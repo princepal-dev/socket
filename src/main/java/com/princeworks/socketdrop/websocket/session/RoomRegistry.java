@@ -12,7 +12,7 @@ public class RoomRegistry {
   private final ConcurrentMap<String, String> sessionToRoom = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Set<String>> roomToSessionId = new ConcurrentHashMap<>();
 
-  public void joinRoom(String sessionId, String roomId) {
+  public synchronized void joinRoom(String sessionId, String roomId) {
     if (sessionId == null || roomId == null) return;
 
     // 1. Remove from old room (if exists)
@@ -31,7 +31,7 @@ public class RoomRegistry {
     sessionToRoom.put(sessionId, roomId);
   }
 
-  public void leaveRoom(String sessionId) {
+  public synchronized void leaveRoom(String sessionId) {
     if (sessionId == null) return;
     String room = sessionToRoom.remove(sessionId);
     if (room == null) return;
@@ -55,7 +55,9 @@ public class RoomRegistry {
   public Set<String> getSessions(String roomId) {
     if (roomId == null) return Collections.emptySet();
     Set<String> sessions = roomToSessionId.get(roomId);
-    return sessions == null ? Collections.emptySet() : Collections.unmodifiableSet(sessions);
+    // Snapshot copy: callers (broadcast fan-out) iterate without seeing
+    // concurrent join/leave interleavings or weakly-consistent views.
+    return sessions == null ? Collections.emptySet() : Set.copyOf(sessions);
   }
 }
 

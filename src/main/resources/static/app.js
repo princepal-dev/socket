@@ -1,815 +1,1055 @@
 /**
- * SocketDrop — Real-Time Peer-to-Peer File Sharing Engine
- * High-performance vanilla JavaScript frontend
+ * SocketDrop — senior-grade vanilla JS client.
+ *
+ * Goals: dead-simple UX, zero state desync.
+ * - Single-flight WebSocket connect + message queue + auto-rejoin
+ * - Pending room-action lock (no double create/join)
+ * - Real XHR upload progress + abort + 50 MB guard
+ * - Real QR via qr.js (window.QRCode), XSS-safe rendering, event delegation
  */
+(() => {
+"use strict";
 
-// DOM Elements
-const wsStatusEl = document.getElementById("wsStatus");
-const currentRoomEl = document.getElementById("currentRoom");
-const currentUserEl = document.getElementById("currentUser");
-const userAvatarEl = document.getElementById("userAvatar");
-const metricUserEl = document.getElementById("metricUser");
-const fileCountEl = document.getElementById("fileCount");
-const joinHintEl = document.getElementById("joinHint");
-const roomPromptEl = document.getElementById("roomPrompt");
-const logEl = document.getElementById("log");
-const fileActionsSectionEl = document.getElementById("fileActionsSection");
-const filesListSectionEl = document.getElementById("filesListSection");
-const fileItemsListEl = document.getElementById("fileItemsList");
-const filesEmptyStateEl = document.getElementById("filesEmptyState");
-const themeToggleEl = document.getElementById("themeToggle");
+const $ = (id) => document.getElementById(id);
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const RECONNECT_BASE_MS = 800;
+const RECONNECT_MAX_MS = 15000;
+const ROOM_ACTION_TIMEOUT_MS = 9000;
 
-const displayNameEl = document.getElementById("displayName");
-const roomIdEl = document.getElementById("roomId");
-const pasteRoomBtn = document.getElementById("pasteRoomBtn");
-const copyRoomBtn = document.getElementById("copyRoomBtn");
-const shareLinkBtn = document.getElementById("shareLinkBtn");
-const qrModalBtn = document.getElementById("qrModalBtn");
-const roomSummaryCardEl = document.getElementById("roomSummaryCard");
-const shareLinkInputEl = document.getElementById("shareLinkInput");
-const copyShareLinkBtn = document.getElementById("copyShareLinkBtn");
-const qrCodeContainerEl = document.getElementById("qrCodeContainer");
+/* ---------- element handles (null-safe) ---------- */
+const els = {
+  wsStatus: $("wsStatus"),
+  userAvatar: $("userAvatar"),
+  currentUser: $("currentUser"),
+  roomPrompt: $("roomPrompt"),
+  joinHint: $("joinHint"),
+  banner: $("activeRoomBanner"),
+  bannerRoomId: $("bannerRoomId"),
+  bannerUserBadge: $("bannerUserBadge"),
+  displayName: $("displayName"),
+  roomId: $("roomId"),
+  pasteRoomBtn: $("pasteRoomBtn"),
+  createRoomBtn: $("createRoomBtn"),
+  joinRoomBtn: $("joinRoomBtn"),
+  leaveRoomBtn: $("leaveRoomBtn"),
+  shareCard: $("shareCard"),
+  shareLinkInput: $("shareLinkInput"),
+  copyShareLinkBtn: $("copyShareLinkBtn"),
+  qrModalBtn: $("qrModalBtn"),
+  qrContainer: $("qrCodeContainer"),
+  fileSection: $("fileActionsSection"),
+  dropZone: $("dropZone"),
+  fileInput: $("uploadFile"),
+  previewBar: $("filePreviewBar"),
+  previewExt: $("previewExt"),
+  previewName: $("previewFileName"),
+  previewSize: $("previewFileSize"),
+  cancelSelectBtn: $("cancelSelectBtn"),
+  uploadBtn: $("uploadBtn"),
+  progressWrap: $("uploadProgressWrap"),
+  progressStatus: $("progressStatusText"),
+  progressPct: $("progressPercent"),
+  progressBar: $("progressBar"),
+  progressTrack: $("progressTrack"),
+  abortBtn: $("abortUploadBtn"),
+  filesSection: $("filesListSection"),
+  fileCountBadge: $("fileCountBadge"),
+  fileSearch: $("fileSearchInput"),
+  filesEmpty: $("filesEmptyState"),
+  fileList: $("fileItemsList"),
+  qrModal: $("qrModal"),
+  closeQrBtn: $("closeQrModalBtn"),
+  modalQr: $("modalQrCode"),
+  modalUrl: $("modalRoomUrl"),
+  copyModalUrlBtn: $("copyModalUrlBtn"),
+  toasts: $("toastContainer"),
+  themeToggle: $("themeToggle"),
+  bannerCopy: $("bannerCopyBtn"),
+  bannerShare: $("bannerShareBtn"),
+  bannerQr: $("bannerQrBtn"),
+  bannerLeave: $("bannerLeaveBtn"),
+  // compat (hidden)
+  currentRoom: $("currentRoom"),
+  metricUser: $("metricUser"),
+  fileCount: $("fileCount"),
+  fileIdInput: $("fileIdInput"),
+};
 
-// File Upload Elements
-const dropZoneEl = document.getElementById("dropZone");
-const uploadFileEl = document.getElementById("uploadFile");
-const filePreviewBarEl = document.getElementById("filePreviewBar");
-const previewFileNameEl = document.getElementById("previewFileName");
-const previewFileSizeEl = document.getElementById("previewFileSize");
-const cancelSelectBtn = document.getElementById("cancelSelectBtn");
-const uploadBtn = document.getElementById("uploadBtn");
-const uploadProgressWrapEl = document.getElementById("uploadProgressWrap");
-const progressBarEl = document.getElementById("progressBar");
-const progressPercentEl = document.getElementById("progressPercent");
-const progressStatusTextEl = document.getElementById("progressStatusText");
-
-// Quick File ID fallback Elements
-const fileIdInputEl = document.getElementById("fileIdInput");
-const downloadBtn = document.getElementById("downloadBtn");
-const deleteBtn = document.getElementById("deleteBtn");
-
-// Control Buttons
-const connectBtn = document.getElementById("connectBtn");
-const createRoomBtn = document.getElementById("createRoomBtn");
-const joinRoomBtn = document.getElementById("joinRoomBtn");
-const leaveRoomBtn = document.getElementById("leaveRoomBtn");
-const clearLogBtn = document.getElementById("clearLogBtn");
-
-// QR Modal Elements
-const qrModalEl = document.getElementById("qrModal");
-const closeQrModalBtn = document.getElementById("closeQrModalBtn");
-const modalQrCodeEl = document.getElementById("modalQrCode");
-const modalRoomUrlEl = document.getElementById("modalRoomUrl");
-const copyModalUrlBtn = document.getElementById("copyModalUrlBtn");
-const toastContainerEl = document.getElementById("toastContainer");
-
-// Nav Pills
-const navPills = document.querySelectorAll(".nav-pill");
-
-// State
-let socket = null;
-const THEME_KEY = "socketdrop-theme";
 const state = {
   connected: false,
   roomId: "",
   userId: "",
   displayName: "",
-  files: new Map(), // fileId -> { fileId, fileName, fileSize, uploadedAt }
+  files: new Map(),
+  uploading: false,
+  pendingAction: null, // 'create' | 'join' | null
+  pendingTimer: null,
+  reconnectAttempts: 0,
+  reconnectTimer: null,
+  rejoinIntent: null, // { roomId, displayName } preserved across drops
+  explicitLeave: false,
+  searchQuery: "",
 };
 
-// Format utilities
-function formatBytes(bytes, decimals = 1) {
-  if (!bytes || bytes === 0) return "0 Bytes";
+let socket = null;
+let connectPromise = null;
+const sendQueue = [];
+let currentXhr = null;
+
+/* ---------- utils ---------- */
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return "—";
+  if (bytes === 0) return "0 B";
   const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
+  const v = bytes / Math.pow(k, i);
+  return (v >= 100 ? Math.round(v) : v.toFixed(1)) + " " + sizes[i];
 }
 
 function getInitials(name) {
   if (!name) return "SD";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "SD";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-// -------------------------------------------------------------
-// Toast Notifications
-// -------------------------------------------------------------
+function extOf(name) {
+  const base = String(name || "").split("?")[0].split("#")[0];
+  const dot = base.lastIndexOf(".");
+  if (dot < 0 || dot === base.length - 1) return "FILE";
+  return base.slice(dot + 1).toUpperCase().slice(0, 4);
+}
+
 function showToast(message, type = "info") {
+  if (!els.toasts) return;
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
-  toast.innerHTML = `<span>${message}</span>`;
-  toastContainerEl.appendChild(toast);
-
+  const dot = document.createElement("span");
+  dot.className = "toast-dot";
+  dot.setAttribute("aria-hidden", "true");
+  const txt = document.createElement("span");
+  txt.textContent = String(message);
+  toast.append(dot, txt);
+  els.toasts.appendChild(toast);
+  while (els.toasts.children.length > 4) els.toasts.firstChild.remove();
   setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateY(10px) scale(0.95)";
-    toast.style.transition = "all 0.25s ease";
-    setTimeout(() => toast.remove(), 250);
+    toast.classList.add("leaving");
+    setTimeout(() => toast.remove(), 260);
   }, 3200);
 }
 
-// -------------------------------------------------------------
-// Theme Management
-// -------------------------------------------------------------
+async function copyText(text, okMsg = "Copied!") {
+  const value = String(text || "");
+  if (!value) {
+    showToast("Nothing to copy yet", "error");
+    return false;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    showToast(okMsg, "success");
+    return true;
+  } catch (_) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      showToast(okMsg, "success");
+      return true;
+    } catch (e2) {
+      showToast("Copy failed — select it manually", "error");
+      return false;
+    }
+  }
+}
+
+/* ---------- theme ---------- */
+const THEME_KEY = "socketdrop-theme";
 function getPreferredTheme() {
-  const storedTheme = window.localStorage.getItem(THEME_KEY);
-  if (storedTheme === "dark" || storedTheme === "light") {
-    return storedTheme;
+  try {
+    const s = localStorage.getItem(THEME_KEY);
+    if (s === "dark" || s === "light") return s;
+  } catch (_) {}
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  try { localStorage.setItem(THEME_KEY, t); } catch (_) {}
+}
+
+/* ---------- connection ---------- */
+function wsUrl() {
+  const proto = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${window.location.host}/room`;
+}
+
+function setStatus(kind) {
+  // kind: offline | connecting | online | reconnecting | uploading (overlay handled separately)
+  if (!els.wsStatus) return;
+  const label = els.wsStatus.querySelector(".status-label");
+  els.wsStatus.classList.remove("connected", "disconnected", "connecting", "reconnecting");
+  let text = "Offline";
+  if (kind === "online") {
+    els.wsStatus.classList.add("connected");
+    text = state.roomId ? "In room" : "Online";
+  } else if (kind === "connecting") {
+    els.wsStatus.classList.add("connecting");
+    text = "Connecting…";
+  } else if (kind === "reconnecting") {
+    els.wsStatus.classList.add("reconnecting");
+    text = "Reconnecting…";
+  } else {
+    els.wsStatus.classList.add("disconnected");
+    text = "Offline";
   }
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  if (label) label.textContent = text;
 }
 
-function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  window.localStorage.setItem(THEME_KEY, theme);
-}
-
-function toggleTheme() {
-  const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
-  const newTheme = currentTheme === "dark" ? "light" : "dark";
-  applyTheme(newTheme);
-  showToast(`Switched to ${newTheme} mode`);
-}
-
-// -------------------------------------------------------------
-// Telemetry & Logging
-// -------------------------------------------------------------
-function log(type, message, payload) {
-  const ts = new Date().toLocaleTimeString();
-  const entry = document.createElement("div");
-  const typeClass = type.toLowerCase();
-  entry.className = `console-entry ${typeClass}`;
-
-  const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
-  entry.innerHTML = `
-    <div class="entry-head">
-      <span class="entry-ts">[${ts}]</span>
-      <span class="entry-type ${typeClass}">${type}</span>
-    </div>
-    <div class="entry-msg">${message}${payloadText}</div>
-  `;
-
-  logEl.prepend(entry);
-}
-
-// -------------------------------------------------------------
-// Connection Status
-// -------------------------------------------------------------
-function setWsStatus(statusText) {
-  wsStatusEl.className = "connection-pill " + statusText;
-  const label = wsStatusEl.querySelector(".status-label");
-  if (label) {
-    label.textContent = statusText.charAt(0).toUpperCase() + statusText.slice(1);
+function flushQueue() {
+  while (sendQueue.length && socket && socket.readyState === WebSocket.OPEN) {
+    const payload = sendQueue.shift();
+    try {
+      socket.send(JSON.stringify(payload));
+    } catch (_) {
+      sendQueue.unshift(payload);
+      break;
+    }
   }
+}
+
+function ensureConnected() {
+  if (socket && socket.readyState === WebSocket.OPEN) return Promise.resolve();
+  if (connectPromise) return connectPromise;
+
+  setStatus(state.reconnectAttempts > 0 ? "reconnecting" : "connecting");
+
+  connectPromise = new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (fn, val) => {
+      if (settled) return;
+      settled = true;
+      fn(val);
+    };
+    try {
+      socket = new WebSocket(wsUrl());
+    } catch (e) {
+      connectPromise = null;
+      done(reject, e);
+      return;
+    }
+
+    const openHandler = () => {
+      state.connected = true;
+      state.reconnectAttempts = 0;
+      if (state.reconnectTimer) { clearTimeout(state.reconnectTimer); state.reconnectTimer = null; }
+      setStatus("online");
+      flushQueue();
+      // Auto-rejoin after an unexpected drop (new session => new userId via JOIN).
+      if (state.rejoinIntent && !state.roomId) {
+        const intent = state.rejoinIntent;
+        state.rejoinIntent = null;
+        queueRoomAction({ type: "JOIN_ROOM", roomId: intent.roomId, displayName: intent.displayName });
+      } else if (state.rejoinIntent && state.roomId) {
+        state.rejoinIntent = null;
+      }
+      connectPromise = null;
+      done(resolve);
+    };
+
+    const failHandler = () => {
+      state.connected = false;
+      connectPromise = null;
+      done(reject, new Error("Could not reach the server. Check your connection."));
+    };
+
+    socket.addEventListener("open", openHandler, { once: true });
+    socket.addEventListener("error", failHandler, { once: true });
+
+    socket.onclose = () => {
+      state.connected = false;
+      socket = null;
+      connectPromise = null;
+      // Preserve room intent for auto-rejoin unless user explicitly left.
+      if (!state.explicitLeave && state.roomId) {
+        state.rejoinIntent = { roomId: state.roomId, displayName: state.displayName };
+        setStatus("reconnecting");
+        scheduleReconnect();
+      } else if (!state.explicitLeave) {
+        setStatus("offline");
+      }
+      renderState();
+    };
+
+    socket.onerror = () => {
+      // onclose follows; keep quiet to avoid double toast.
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        handleServerMessage(JSON.parse(event.data));
+      } catch (_) {
+        // ignore non-JSON
+      }
+    };
+  });
+
+  return connectPromise;
+}
+
+function scheduleReconnect() {
+  if (state.explicitLeave) return;
+  if (state.reconnectTimer) return;
+  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(1.6, state.reconnectAttempts));
+  state.reconnectAttempts += 1;
+  state.reconnectTimer = setTimeout(async () => {
+    state.reconnectTimer = null;
+    if (state.explicitLeave || state.connected) return;
+    if (!state.rejoinIntent) return;
+    try {
+      await ensureConnected();
+      renderState();
+    } catch (_) {
+      setStatus("reconnecting");
+      scheduleReconnect();
+      renderState();
+    }
+  }, delay);
+}
+
+function queueRoomAction(payload) {
+  sendQueue.push(payload);
+  flushQueue();
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    ensureConnected().catch((e) => showToast(e.message, "error"));
+  }
+}
+
+/* ---------- room actions ---------- */
+function lockAction(kind) {
+  state.pendingAction = kind;
+  if (state.pendingTimer) clearTimeout(state.pendingTimer);
+  state.pendingTimer = setTimeout(() => {
+    if (state.pendingAction) {
+      state.pendingAction = null;
+      renderState();
+      showToast("Server is taking too long — try again", "error");
+    }
+  }, ROOM_ACTION_TIMEOUT_MS);
+  renderState();
+}
+
+function unlockAction() {
+  state.pendingAction = null;
+  if (state.pendingTimer) { clearTimeout(state.pendingTimer); state.pendingTimer = null; }
+}
+
+function currentDisplayName(fallbackPrefix = "Guest") {
+  const v = (els.displayName && els.displayName.value || "").trim();
+  if (v) return v.slice(0, 32);
+  const gen = `${fallbackPrefix} ${Math.floor(100 + Math.random() * 900)}`;
+  if (els.displayName) els.displayName.value = gen;
+  return gen;
+}
+
+async function onCreateRoom() {
+  if (state.pendingAction || state.uploading && false) return;
+  if (isInRoom()) {
+    showToast("You are already in a room", "info");
+    return;
+  }
+  const displayName = currentDisplayName();
+  state.displayName = displayName;
+  state.explicitLeave = false;
+  lockAction("create");
+  try {
+    await ensureConnected();
+    queueRoomAction({ type: "CREATE_ROOM", displayName });
+  } catch (e) {
+    unlockAction();
+    renderState();
+    showToast(e.message, "error");
+  }
+}
+
+async function onJoinRoom() {
+  if (state.pendingAction) return;
+  if (isInRoom()) {
+    showToast("You are already in a room — leave first to join another", "info");
+    return;
+  }
+  const roomId = (els.roomId && els.roomId.value || "").trim();
+  if (!roomId) {
+    showToast("Paste a room code first, or create a new room", "error");
+    if (els.roomId) els.roomId.focus();
+    return;
+  }
+  const displayName = currentDisplayName();
+  state.displayName = displayName;
+  state.explicitLeave = false;
+  lockAction("join");
+  try {
+    await ensureConnected();
+    queueRoomAction({ type: "JOIN_ROOM", roomId, displayName });
+  } catch (e) {
+    unlockAction();
+    renderState();
+    showToast(e.message, "error");
+  }
+}
+
+function onLeaveRoom() {
+  if (!isInRoom() && !state.rejoinIntent) return;
+  state.explicitLeave = true;
+  state.rejoinIntent = null;
+  if (state.reconnectTimer) { clearTimeout(state.reconnectTimer); state.reconnectTimer = null; }
+  try {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "LEAVE_ROOM" }));
+    }
+  } catch (_) {}
+  abortUpload(true);
+  clearRoomState();
+  showToast("Left the room");
+}
+
+function clearRoomState() {
+  state.roomId = "";
+  state.userId = "";
+  state.files.clear();
+  state.searchQuery = "";
+  if (els.fileSearch) els.fileSearch.value = "";
+  if (els.fileInput) els.fileInput.value = "";
+  unlockAction();
+  hidePreview();
+  hideProgress();
+  setStatus(state.connected ? "online" : "offline");
+  renderState();
 }
 
 function isInRoom() {
   return Boolean(state.roomId && state.userId);
 }
 
-// -------------------------------------------------------------
-// Render UI State
-// -------------------------------------------------------------
+/* ---------- server messages ---------- */
+function handleServerMessage(data) {
+  if (!data || typeof data !== "object") return;
+  switch (data.type) {
+    case "ROOM_CREATED": {
+      unlockAction();
+      if (data.roomId) state.roomId = String(data.roomId);
+      if (data.userId) state.userId = String(data.userId);
+      if (data.displayName) {
+        state.displayName = String(data.displayName);
+        if (els.displayName) els.displayName.value = state.displayName;
+      }
+      state.explicitLeave = false;
+      state.rejoinIntent = null;
+      setStatus("online");
+      renderState();
+      showToast("Room created — share the link!", "success");
+      break;
+    }
+    case "ROOM_JOINED": {
+      unlockAction();
+      if (data.roomId) state.roomId = String(data.roomId);
+      if (data.userId) state.userId = String(data.userId);
+      if (data.displayName) {
+        state.displayName = String(data.displayName);
+        if (els.displayName) els.displayName.value = state.displayName;
+      }
+      if (els.roomId && state.roomId) els.roomId.value = state.roomId;
+      state.explicitLeave = false;
+      state.rejoinIntent = null;
+      setStatus("online");
+      renderState();
+      showToast("Joined room!", "success");
+      break;
+    }
+    case "UPLOAD_PROGRESS": {
+      if (data.status === "COMPLETED" && data.fileId) {
+        const id = String(data.fileId);
+        if (!state.files.has(id)) {
+          state.files.set(id, {
+            fileId: id,
+            fileName: String(data.fileName || `${id}.bin`),
+            fileSize: Number(data.fileSize || 0),
+            uploadedAt: new Date(),
+          });
+          renderState();
+        }
+        if (!state.uploading) showToast(`New file: ${data.fileName || "file"}`, "success");
+      } else if (data.status === "STARTED") {
+        if (!state.uploading) showToast(`Someone is sending ${data.fileName || "a file"}…`, "info");
+      } else if (data.status === "FAILED") {
+        showToast(`Send failed: ${data.message || "unknown error"}`, "error");
+      }
+      break;
+    }
+    case "ERROR": {
+      const msg = String((data && data.message) || "Something went wrong");
+      // Auto-rejoin may target an expired room (last peer left => server evicted it).
+      if (state.pendingAction && /does not exist/i.test(msg)) {
+        unlockAction();
+        state.rejoinIntent = null;
+        if (state.reconnectTimer) { clearTimeout(state.reconnectTimer); state.reconnectTimer = null; }
+        renderState();
+        showToast("That room has closed — create a new one", "error");
+      } else if (state.pendingAction) {
+        unlockAction();
+        renderState();
+        showToast(msg, "error");
+      } else {
+        showToast(msg, "error");
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+/* ---------- rendering ---------- */
+function shareUrl() {
+  if (!state.roomId) return "";
+  return `${window.location.origin}/?roomId=${encodeURIComponent(state.roomId)}`;
+}
+
+function renderQrInto(el, text, size) {
+  if (!el) return;
+  el.innerHTML = "";
+  if (!text) {
+    const ph = document.createElement("span");
+    ph.className = "qr-placeholder";
+    ph.textContent = "QR appears after you create a room";
+    el.appendChild(ph);
+    return;
+  }
+  try {
+    if (window.QRCode && typeof window.QRCode.generateSvg === "function") {
+      el.innerHTML = window.QRCode.generateSvg(text, size);
+      const svg = el.querySelector("svg");
+      if (svg) {
+        svg.setAttribute("role", "img");
+        svg.setAttribute("aria-label", "QR code for room link");
+      }
+      return;
+    }
+  } catch (_) {}
+  const fallback = document.createElement("div");
+  fallback.className = "qr-fallback";
+  fallback.textContent = text;
+  el.appendChild(fallback);
+}
+
 function renderState() {
   const inRoom = isInRoom();
+  const busy = Boolean(state.pendingAction);
 
-  currentRoomEl.textContent = state.roomId || "-";
-  currentUserEl.textContent = state.displayName || (state.userId ? state.userId.substring(0, 14) + "..." : "Guest");
-  userAvatarEl.textContent = getInitials(state.displayName || state.userId);
-  metricUserEl.textContent = state.userId || "Guest";
-  fileCountEl.textContent = state.files.size;
-
-  fileActionsSectionEl.hidden = !inRoom;
-  roomSummaryCardEl.hidden = !inRoom;
-
-  leaveRoomBtn.disabled = !inRoom;
-  shareLinkBtn.disabled = !inRoom;
-  qrModalBtn.disabled = !inRoom;
-
-  const hasManualFileId = Boolean((fileIdInputEl.value || "").trim());
-  downloadBtn.disabled = !inRoom || !hasManualFileId;
-  deleteBtn.disabled = !inRoom || !hasManualFileId;
-
-  if (inRoom) {
-    joinHintEl.textContent = "Room active • Ready to share";
-    roomPromptEl.textContent = `Connected as ${state.displayName} in ${state.roomId}`;
-    const shareUrl = `${window.location.origin}/?roomId=${encodeURIComponent(state.roomId)}`;
-    shareLinkInputEl.value = shareUrl;
-    modalRoomUrlEl.value = shareUrl;
-    renderQrCode(shareUrl, qrCodeContainerEl, 120);
-    renderQrCode(shareUrl, modalQrCodeEl, 200);
-  } else if (!state.connected) {
-    joinHintEl.textContent = "Offline • Connect or create room";
-    roomPromptEl.textContent = "Step 1: Enter name. Step 2: Create room or enter room ID to join.";
-  } else {
-    joinHintEl.textContent = "Connected • Waiting for room join";
-    roomPromptEl.textContent = "Click Create Room for a new room, or Join Room with an ID.";
+  if (els.currentUser) els.currentUser.textContent = state.displayName || (state.userId ? "Guest" : "Guest");
+  if (els.userAvatar) els.userAvatar.textContent = getInitials(state.displayName || state.userId);
+  if (els.currentRoom) els.currentRoom.textContent = state.roomId || "";
+  if (els.metricUser) els.metricUser.textContent = state.userId || "Guest";
+  if (els.fileCount) els.fileCount.textContent = String(state.files.size);
+  if (els.fileCountBadge) els.fileCountBadge.textContent = String(state.files.size);
+  if (els.fileIdInput && state.files.size === 1) {
+    const [only] = state.files.keys();
+    els.fileIdInput.value = only;
   }
 
-  renderFilesList();
+  if (els.roomPrompt) {
+    if (inRoom) els.roomPrompt.textContent = `You are in as ${state.displayName}. Share the link below.`;
+    else if (busy) els.roomPrompt.textContent = state.pendingAction === "create" ? "Creating your room…" : "Joining room…";
+    else if (state.rejoinIntent || (!state.connected && state.roomId)) els.roomPrompt.textContent = "Reconnecting… keep this tab open.";
+    else els.roomPrompt.textContent = "Enter your name, then create a new room or join with a code.";
+  }
+  if (els.joinHint) {
+    if (inRoom) els.joinHint.textContent = "Room is live — invite others with the link or QR.";
+    else els.joinHint.textContent = "You’ll get a link + QR to invite others.";
+  }
+
+  if (els.banner) els.banner.hidden = !inRoom;
+  if (inRoom) {
+    if (els.bannerRoomId) els.bannerRoomId.textContent = state.roomId;
+    if (els.bannerUserBadge) els.bannerUserBadge.textContent = state.displayName || "Guest";
+  }
+
+  if (els.shareCard) els.shareCard.hidden = !inRoom;
+  if (els.fileSection) els.fileSection.hidden = !inRoom;
+  if (els.filesSection) els.filesSection.hidden = !inRoom;
+
+  const url = shareUrl();
+  if (els.shareLinkInput && inRoom) els.shareLinkInput.value = url;
+  if (els.modalUrl && inRoom) els.modalUrl.value = url;
+  if (inRoom) {
+    renderQrInto(els.qrContainer, url, 132);
+    renderQrInto(els.modalQr, url, 208);
+  }
+
+  // Buttons: single source of truth, no desync.
+  if (els.createRoomBtn) els.createRoomBtn.disabled = busy || inRoom;
+  if (els.joinRoomBtn) els.joinRoomBtn.disabled = busy || inRoom;
+  if (els.leaveRoomBtn) els.leaveRoomBtn.hidden = !inRoom;
+  if (els.leaveRoomBtn) els.leaveRoomBtn.disabled = !inRoom;
+  if (els.uploadBtn) {
+    const hasFile = Boolean(els.fileInput && els.fileInput.files && els.fileInput.files[0]);
+    els.uploadBtn.disabled = !inRoom || !hasFile || state.uploading;
+  }
+
+  // Steps indicator
+  document.querySelectorAll(".step").forEach((el) => {
+    const n = Number(el.getAttribute("data-step"));
+    el.classList.toggle("done", inRoom || (n === 1 && Boolean(state.displayName)));
+    el.classList.toggle("active", !inRoom && ((n === 1 && !state.displayName) || (n === 2 && Boolean(state.displayName))));
+  });
+
+  renderFiles();
 }
 
-// -------------------------------------------------------------
-// File Repository List Rendering
-// -------------------------------------------------------------
-function renderFilesList() {
-  if (state.files.size === 0) {
-    filesEmptyStateEl.hidden = false;
-    fileItemsListEl.hidden = true;
-    fileItemsListEl.innerHTML = "";
+function renderFiles() {
+  if (!els.fileList || !els.filesEmpty) return;
+  const q = state.searchQuery.trim().toLowerCase();
+  const items = [...state.files.values()]
+    .filter((f) => !q || f.fileName.toLowerCase().includes(q) || f.fileId.toLowerCase().includes(q))
+    .sort((a, b) => b.uploadedAt - a.uploadedAt);
+
+  els.fileList.innerHTML = "";
+  const showEmpty = items.length === 0;
+  els.filesEmpty.hidden = !showEmpty || state.files.size > 0 && items.length > 0 ? showEmpty : showEmpty;
+  els.filesEmpty.hidden = items.length > 0 ? true : false;
+  els.fileList.hidden = items.length === 0;
+
+  if (items.length === 0 && state.files.size > 0) {
+    els.filesEmpty.hidden = false;
+    els.filesEmpty.querySelector(".empty-title").textContent = "No matches";
+    els.filesEmpty.querySelector(".empty-desc").textContent = "Try a different search.";
     return;
   }
+  if (state.files.size === 0) {
+    els.filesEmpty.querySelector(".empty-title").textContent = "No files yet";
+    els.filesEmpty.querySelector(".empty-desc").textContent = "Drop your first file above, or wait for a friend to send one.";
+  }
 
-  filesEmptyStateEl.hidden = true;
-  fileItemsListEl.hidden = false;
-  fileItemsListEl.innerHTML = "";
-
-  state.files.forEach((file) => {
-    const ext = (file.fileName.split(".").pop() || "BIN").toUpperCase().slice(0, 4);
+  for (const file of items) {
     const card = document.createElement("div");
     card.className = "file-card-item";
-    card.innerHTML = `
-      <div class="file-card-main">
-        <div class="file-type-pill">${ext}</div>
-        <div class="file-card-meta">
-          <span class="file-card-title" title="${file.fileName}">${file.fileName}</span>
-          <div class="file-card-sub">
-            <span>${formatBytes(file.fileSize)}</span>
-            <span>•</span>
-            <span class="file-id-chip">${file.fileId}</span>
-          </div>
-        </div>
-      </div>
-      <div class="file-card-actions">
-        <button class="btn btn-xs btn-outline" data-action="copy-id" data-id="${file.fileId}" type="button" title="Copy File ID">
-          Copy ID
-        </button>
-        <button class="btn btn-xs btn-lime" data-action="download" data-id="${file.fileId}" type="button">
-          Download
-        </button>
-        <button class="btn btn-xs btn-danger" data-action="delete" data-id="${file.fileId}" type="button">
-          Delete
-        </button>
-      </div>
-    `;
 
-    // Event listeners for file card buttons
-    card.querySelector('[data-action="copy-id"]').addEventListener("click", () => {
-      navigator.clipboard.writeText(file.fileId).then(() => showToast("File ID copied!"));
-    });
+    const main = document.createElement("div");
+    main.className = "file-card-main";
 
-    card.querySelector('[data-action="download"]').addEventListener("click", () => {
-      fileIdInputEl.value = file.fileId;
-      downloadFileById(file.fileId);
-    });
+    const pill = document.createElement("div");
+    pill.className = "file-type-pill";
+    pill.textContent = extOf(file.fileName);
 
-    card.querySelector('[data-action="delete"]').addEventListener("click", () => {
-      deleteFileById(file.fileId);
-    });
+    const meta = document.createElement("div");
+    meta.className = "file-card-meta";
+    const title = document.createElement("span");
+    title.className = "file-card-title";
+    title.textContent = file.fileName;
+    title.title = file.fileName;
+    const sub = document.createElement("div");
+    sub.className = "file-card-sub";
+    const size = document.createElement("span");
+    size.textContent = formatBytes(file.fileSize);
+    const dot = document.createElement("span");
+    dot.textContent = "•";
+    dot.setAttribute("aria-hidden", "true");
+    const id = document.createElement("span");
+    id.className = "file-id-chip";
+    id.textContent = file.fileId.length > 18 ? file.fileId.slice(0, 18) + "…" : file.fileId;
+    id.title = file.fileId;
+    sub.append(size, dot, id);
+    meta.append(title, sub);
+    main.append(pill, meta);
 
-    fileItemsListEl.appendChild(card);
-  });
-}
+    const actions = document.createElement("div");
+    actions.className = "file-card-actions";
 
-// -------------------------------------------------------------
-// WebSocket Protocol Engine
-// -------------------------------------------------------------
-function wsUrl() {
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.host}/room`;
-}
+    const dl = document.createElement("button");
+    dl.className = "btn btn-xs btn-lime";
+    dl.type = "button";
+    dl.dataset.action = "download";
+    dl.dataset.id = file.fileId;
+    dl.textContent = "Download";
 
-function ensureConnected() {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    return Promise.resolve();
-  }
+    const del = document.createElement("button");
+    del.className = "btn btn-xs btn-danger";
+    del.type = "button";
+    del.dataset.action = "delete";
+    del.dataset.id = file.fileId;
+    del.textContent = "Delete";
 
-  if (socket && socket.readyState === WebSocket.CONNECTING) {
-    return new Promise((resolve, reject) => {
-      socket.addEventListener("open", () => resolve(), { once: true });
-      socket.addEventListener("error", () => reject(new Error("WebSocket error")), { once: true });
-    });
-  }
-
-  return new Promise((resolve, reject) => {
-    socket = new WebSocket(wsUrl());
-
-    socket.onopen = () => {
-      state.connected = true;
-      setWsStatus("connected");
-      renderState();
-      log("INFO", "Connected to WebSocket /room");
-      showToast("Connected to SocketDrop", "success");
-      resolve();
-    };
-
-    socket.onclose = () => {
-      state.connected = false;
-      state.roomId = "";
-      state.userId = "";
-      setWsStatus("disconnected");
-      renderState();
-      log("WARN", "WebSocket connection closed");
-    };
-
-    socket.onerror = (err) => {
-      setWsStatus("disconnected");
-      log("ERROR", "WebSocket connection error", err);
-      reject(new Error("WebSocket error"));
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        handleServerMessage(data);
-      } catch (error) {
-        log("WARN", "Received non-JSON message", event.data);
-      }
-    };
-  });
-}
-
-function sendWs(payload) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    showToast("Socket not connected", "error");
-    return;
-  }
-  socket.send(JSON.stringify(payload));
-  log("INFO", `Sent ${payload.type}`, payload);
-}
-
-function handleServerMessage(data) {
-  switch (data.type) {
-    case "ROOM_CREATED":
-      if (data.roomId) {
-        state.roomId = data.roomId;
-        roomIdEl.value = data.roomId;
-      }
-      if (data.userId) state.userId = data.userId;
-      if (data.displayName) state.displayName = data.displayName;
-      renderState();
-      log("SUCCESS", `Room created: ${data.roomId}`, data);
-      showToast(`Room created: ${data.roomId}`, "success");
-      break;
-
-    case "ROOM_JOINED":
-      if (data.roomId) {
-        state.roomId = data.roomId;
-        roomIdEl.value = data.roomId;
-      }
-      if (data.userId) state.userId = data.userId;
-      if (data.displayName) state.displayName = data.displayName;
-      renderState();
-      log("SUCCESS", `Joined room: ${data.roomId}`, data);
-      showToast(`Joined room: ${data.roomId}`, "success");
-      break;
-
-    case "UPLOAD_PROGRESS":
-      log("INFO", `Upload progress [${data.status}]`, data);
-      if (data.status === "STARTED") {
-        showToast(`Peer upload started: ${data.fileName || "file"}`);
-      } else if (data.status === "COMPLETED" && data.fileId) {
-        fileIdInputEl.value = data.fileId;
-        state.files.set(data.fileId, {
-          fileId: data.fileId,
-          fileName: data.fileName || `${data.fileId}.bin`,
-          fileSize: data.fileSize || 0,
-          uploadedAt: new Date(),
-        });
-        renderState();
-        showToast(`File available: ${data.fileName}`, "success");
-      } else if (data.status === "FAILED") {
-        showToast(`Upload failed: ${data.message || "Unknown error"}`, "error");
-      }
-      break;
-
-    case "ERROR":
-      log("ERROR", `Server Error: ${data.message || "Unknown"}`, data);
-      showToast(data.message || "Server Error", "error");
-      break;
-
-    default:
-      log("INFO", `WS Event: ${data.type || "UNKNOWN"}`, data);
+    actions.append(dl, del);
+    card.append(main, actions);
+    els.fileList.appendChild(card);
   }
 }
 
-// -------------------------------------------------------------
-// Drag & Drop & Upload Engine
-// -------------------------------------------------------------
-dropZoneEl.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  dropZoneEl.classList.add("dragover");
-});
-
-dropZoneEl.addEventListener("dragleave", () => {
-  dropZoneEl.classList.remove("dragover");
-});
-
-dropZoneEl.addEventListener("drop", (e) => {
-  e.preventDefault();
-  dropZoneEl.classList.remove("dragover");
-  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-    uploadFileEl.files = e.dataTransfer.files;
-    handleFileSelected();
-  }
-});
-
-uploadFileEl.addEventListener("change", handleFileSelected);
+/* ---------- file picking ---------- */
+function hidePreview() {
+  if (els.previewBar) els.previewBar.hidden = true;
+}
+function hideProgress() {
+  if (els.progressWrap) els.progressWrap.hidden = true;
+  if (els.progressBar) els.progressBar.style.width = "0%";
+  if (els.progressPct) els.progressPct.textContent = "0%";
+  if (els.progressTrack) els.progressTrack.setAttribute("aria-valuenow", "0");
+}
 
 function handleFileSelected() {
-  const file = uploadFileEl.files && uploadFileEl.files[0];
+  const file = els.fileInput && els.fileInput.files && els.fileInput.files[0];
   if (!file) {
-    filePreviewBarEl.hidden = true;
-    uploadBtn.disabled = true;
+    hidePreview();
+    renderState();
     return;
   }
-
-  previewFileNameEl.textContent = file.name;
-  previewFileSizeEl.textContent = formatBytes(file.size);
-  filePreviewBarEl.hidden = false;
-  uploadBtn.disabled = !isInRoom();
+  if (file.size > MAX_FILE_SIZE) {
+    if (els.fileInput) els.fileInput.value = "";
+    hidePreview();
+    showToast("That file is over 50 MB — pick a smaller one", "error");
+    renderState();
+    return;
+  }
+  if (els.previewName) els.previewName.textContent = file.name;
+  if (els.previewSize) els.previewSize.textContent = formatBytes(file.size);
+  if (els.previewExt) els.previewExt.textContent = extOf(file.name);
+  if (els.previewBar) els.previewBar.hidden = false;
+  renderState();
 }
 
-cancelSelectBtn.addEventListener("click", () => {
-  uploadFileEl.value = "";
-  filePreviewBarEl.hidden = true;
-  uploadBtn.disabled = true;
-});
+/* ---------- upload (real progress) ---------- */
+function setProgress(loaded, total, label) {
+  const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+  if (els.progressBar) els.progressBar.style.width = pct + "%";
+  if (els.progressPct) els.progressPct.textContent = pct + "%";
+  if (els.progressStatus) els.progressStatus.textContent = label || "Sending…";
+  if (els.progressTrack) els.progressTrack.setAttribute("aria-valuenow", String(pct));
+}
 
-async function uploadFile() {
+function uploadFile() {
   if (!isInRoom()) {
-    showToast("Please join a room before uploading files", "error");
+    showToast("Create or join a room first", "error");
     return;
   }
-
-  const file = uploadFileEl.files && uploadFileEl.files[0];
+  if (state.uploading) return;
+  const file = els.fileInput && els.fileInput.files && els.fileInput.files[0];
   if (!file) {
-    showToast("Select a file to upload", "error");
+    showToast("Choose a file first", "error");
+    return;
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    showToast("That file is over 50 MB", "error");
     return;
   }
 
-  uploadBtn.disabled = true;
-  uploadProgressWrapEl.hidden = false;
-  progressBarEl.style.width = "15%";
-  progressPercentEl.textContent = "15%";
-  progressStatusTextEl.textContent = "Starting upload...";
+  state.uploading = true;
+  if (els.progressWrap) els.progressWrap.hidden = false;
+  setProgress(0, 1, "Starting…");
+  renderState();
 
-  const formData = new FormData();
-  formData.append("file", file);
+  const xhr = new XMLHttpRequest();
+  currentXhr = xhr;
+  const url = `/file/uploads?roomId=${encodeURIComponent(state.roomId)}`;
+  const form = new FormData();
+  form.append("file", file, file.name);
 
-  try {
-    const url = `/file/uploads?roomId=${encodeURIComponent(state.roomId)}`;
-    progressBarEl.style.width = "45%";
-    progressPercentEl.textContent = "45%";
-    progressStatusTextEl.textContent = "Transferring payload...";
+  xhr.open("POST", url, true);
 
-    const res = await fetch(url, {
-      method: "POST",
-      body: formData,
-    });
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) setProgress(e.loaded, e.total, `Sending ${formatBytes(e.loaded)} of ${formatBytes(e.total)}…`);
+    else setProgress(0, 1, "Sending…");
+  };
 
-    progressBarEl.style.width = "90%";
-    progressPercentEl.textContent = "90%";
-    progressStatusTextEl.textContent = "Finalizing...";
-
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(body.message || `Upload failed (${res.status})`);
-    }
-
-    progressBarEl.style.width = "100%";
-    progressPercentEl.textContent = "100%";
-    progressStatusTextEl.textContent = "Completed!";
-
-    // Register local file
-    if (body.fileId) {
-      state.files.set(body.fileId, {
-        fileId: body.fileId,
-        fileName: body.fileName || file.name,
-        fileSize: body.fileSize || file.size,
+  xhr.onload = () => {
+    currentXhr = null;
+    state.uploading = false;
+    let body = {};
+    try { body = JSON.parse(xhr.responseText || "{}"); } catch (_) {}
+    if (xhr.status >= 200 && xhr.status < 300 && body.fileId) {
+      setProgress(1, 1, "Done!");
+      const id = String(body.fileId);
+      state.files.set(id, {
+        fileId: id,
+        fileName: String(body.fileName || file.name),
+        fileSize: Number(body.fileSize || file.size),
         uploadedAt: new Date(),
       });
-      fileIdInputEl.value = body.fileId;
+      if (els.fileIdInput) els.fileIdInput.value = id;
+      if (els.fileInput) els.fileInput.value = "";
+      hidePreview();
+      renderState();
+      showToast(`Sent ${file.name}`, "success");
+      setTimeout(hideProgress, 1200);
+    } else {
+      hideProgress();
+      renderState();
+      showToast((body && body.message) || `Send failed (${xhr.status})`, "error");
     }
+  };
 
+  xhr.onerror = () => {
+    currentXhr = null;
+    state.uploading = false;
+    hideProgress();
     renderState();
-    showToast(`✓ Uploaded ${file.name}`, "success");
-    log("SUCCESS", `File uploaded successfully: ${body.fileId}`, body);
+    showToast("Network error while sending", "error");
+  };
 
-    setTimeout(() => {
-      uploadProgressWrapEl.hidden = true;
-      uploadFileEl.value = "";
-      filePreviewBarEl.hidden = true;
-      progressBarEl.style.width = "0%";
-    }, 1200);
-  } catch (error) {
-    uploadProgressWrapEl.hidden = true;
-    uploadBtn.disabled = false;
-    showToast(error.message, "error");
-    log("ERROR", error.message);
-  }
+  xhr.onabort = () => {
+    currentXhr = null;
+    state.uploading = false;
+    hideProgress();
+    renderState();
+    showToast("Send cancelled", "info");
+  };
+
+  xhr.send(form);
 }
 
-// -------------------------------------------------------------
-// Download & Delete Engine
-// -------------------------------------------------------------
-async function downloadFileById(fileId) {
-  if (!isInRoom()) {
-    showToast("Join a room before downloading", "error");
+function abortUpload(silent) {
+  if (currentXhr && state.uploading) {
+    try { currentXhr.abort(); } catch (_) {}
+  } else if (!silent) {
     return;
   }
+  currentXhr = null;
+  state.uploading = false;
+}
 
+/* ---------- download / delete ---------- */
+async function downloadFileById(fileId) {
+  const id = String(fileId || "").trim();
+  if (!id) return;
+  if (!isInRoom()) {
+    showToast("Join a room first", "error");
+    return;
+  }
   try {
-    showToast("Preparing download stream...");
+    showToast("Preparing download…", "info");
     const query = new URLSearchParams({ roomId: state.roomId, userId: state.userId });
-    const res = await fetch(`/file/downloads/${encodeURIComponent(fileId)}?${query.toString()}`);
-
+    const res = await fetch(`/file/downloads/${encodeURIComponent(id)}?${query.toString()}`);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.message || `Download failed (${res.status})`);
     }
-
     const blob = await res.blob();
     const disposition = res.headers.get("content-disposition") || "";
-    let filename = `${fileId}.bin`;
-
-    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-    const standardMatch = disposition.match(/filename="?([^";]+)"?/i);
-    if (utf8Match && utf8Match[1]) {
-      try {
-        filename = decodeURIComponent(utf8Match[1]);
-      } catch (_) {
-        filename = utf8Match[1];
-      }
-    } else if (standardMatch && standardMatch[1]) {
-      filename = standardMatch[1];
+    let filename = `${id}.bin`;
+    const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    const std = disposition.match(/filename="?([^";]+)"?/i);
+    if (utf8 && utf8[1]) {
+      try { filename = decodeURIComponent(utf8[1]); } catch (_) { filename = utf8[1]; }
+    } else if (std && std[1]) {
+      filename = std[1];
     }
+    const meta = state.files.get(id);
+    if ((!filename || filename === `${id}.bin`) && meta) filename = meta.fileName;
 
-    const url = window.URL.createObjectURL(blob);
+    const objUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
+    a.href = objUrl;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    window.URL.revokeObjectURL(url);
-
-    showToast(`Downloaded ${filename}`, "success");
-    log("SUCCESS", `Downloaded ${filename}`);
-  } catch (error) {
-    showToast(error.message, "error");
-    log("ERROR", error.message);
+    setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
+    showToast(`Saved ${filename}`, "success");
+  } catch (e) {
+    showToast(e.message || "Download failed", "error");
   }
 }
 
 async function deleteFileById(fileId) {
-  if (!confirm(`Are you sure you want to delete file "${fileId}" from the room?`)) {
-    return;
-  }
-
+  const id = String(fileId || "").trim();
+  if (!id) return;
+  const meta = state.files.get(id);
+  const label = meta ? meta.fileName : id;
+  if (!window.confirm(`Delete "${label}" for everyone in the room?`)) return;
   try {
     const query = new URLSearchParams();
     if (state.roomId) query.set("roomId", state.roomId);
     if (state.userId) query.set("userId", state.userId);
-    const queryString = query.toString() ? `?${query.toString()}` : "";
-
-    const res = await fetch(`/file/downloads/${encodeURIComponent(fileId)}${queryString}`, {
-      method: "DELETE",
-    });
-
-    if (!res.ok) {
+    const qs = query.toString() ? `?${query.toString()}` : "";
+    const res = await fetch(`/file/downloads/${encodeURIComponent(id)}${qs}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 204) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.message || `Delete failed (${res.status})`);
     }
-
-    state.files.delete(fileId);
-    if (fileIdInputEl.value === fileId) {
-      fileIdInputEl.value = "";
-    }
+    state.files.delete(id);
     renderState();
-    showToast(`Deleted file ${fileId}`, "success");
-    log("SUCCESS", `Deleted file: ${fileId}`);
-  } catch (error) {
-    showToast(error.message, "error");
-    log("ERROR", error.message);
+    showToast("File deleted", "success");
+  } catch (e) {
+    showToast(e.message || "Delete failed", "error");
   }
 }
 
-// -------------------------------------------------------------
-// Interactive Room & Button Listeners
-// -------------------------------------------------------------
-connectBtn.addEventListener("click", async () => {
-  try {
-    await ensureConnected();
-  } catch (error) {
-    showToast(error.message, "error");
-  }
-});
+/* ---------- wiring ---------- */
+function wire() {
+  if (els.createRoomBtn) els.createRoomBtn.addEventListener("click", onCreateRoom);
+  if (els.joinRoomBtn) els.joinRoomBtn.addEventListener("click", onJoinRoom);
+  if (els.leaveRoomBtn) els.leaveRoomBtn.addEventListener("click", onLeaveRoom);
+  if (els.bannerLeave) els.bannerLeave.addEventListener("click", onLeaveRoom);
 
-createRoomBtn.addEventListener("click", async () => {
-  try {
-    const displayName = (displayNameEl.value || "").trim() || "User_" + Math.floor(Math.random() * 1000);
-    displayNameEl.value = displayName;
-    state.displayName = displayName;
-    await ensureConnected();
-    sendWs({ type: "CREATE_ROOM", displayName });
-  } catch (error) {
-    showToast(error.message, "error");
-  }
-});
-
-joinRoomBtn.addEventListener("click", async () => {
-  try {
-    const roomId = (roomIdEl.value || "").trim();
-    if (!roomId) {
-      showToast("Please enter a Room ID to join", "error");
-      return;
-    }
-    const displayName = (displayNameEl.value || "").trim() || "User_" + Math.floor(Math.random() * 1000);
-    displayNameEl.value = displayName;
-    state.displayName = displayName;
-    await ensureConnected();
-    sendWs({ type: "JOIN_ROOM", roomId, displayName });
-  } catch (error) {
-    showToast(error.message, "error");
-  }
-});
-
-leaveRoomBtn.addEventListener("click", () => {
-  sendWs({ type: "LEAVE_ROOM" });
-  state.roomId = "";
-  state.userId = "";
-  state.files.clear();
-  renderState();
-  showToast("Left room");
-  log("INFO", "Left room locally");
-});
-
-pasteRoomBtn.addEventListener("click", async () => {
-  try {
-    const text = await navigator.clipboard.readText();
-    if (text) {
-      let candidate = text.trim();
-      if (candidate.includes("roomId=")) {
-        const url = new URL(candidate);
-        candidate = url.searchParams.get("roomId") || candidate;
-      }
-      roomIdEl.value = candidate;
-      showToast("Room ID pasted from clipboard!");
-    }
-  } catch (_) {
-    showToast("Clipboard access denied", "error");
-  }
-});
-
-copyRoomBtn.addEventListener("click", () => {
-  if (!state.roomId) {
-    showToast("No active room to copy", "error");
-    return;
-  }
-  navigator.clipboard.writeText(state.roomId).then(() => showToast("Room ID copied to clipboard!"));
-});
-
-shareLinkBtn.addEventListener("click", () => {
-  if (!state.roomId) return;
-  const url = `${window.location.origin}/?roomId=${encodeURIComponent(state.roomId)}`;
-  navigator.clipboard.writeText(url).then(() => showToast("Shareable link copied!"));
-});
-
-copyShareLinkBtn.addEventListener("click", () => {
-  navigator.clipboard.writeText(shareLinkInputEl.value).then(() => showToast("Room link copied!"));
-});
-
-uploadBtn.addEventListener("click", uploadFile);
-
-downloadBtn.addEventListener("click", () => {
-  const fileId = (fileIdInputEl.value || "").trim();
-  if (!fileId) {
-    showToast("Enter a File ID", "error");
-    return;
-  }
-  downloadFileById(fileId);
-});
-
-deleteBtn.addEventListener("click", () => {
-  const fileId = (fileIdInputEl.value || "").trim();
-  if (!fileId) {
-    showToast("Enter a File ID", "error");
-    return;
-  }
-  deleteFileById(fileId);
-});
-
-fileIdInputEl.addEventListener("input", renderState);
-
-clearLogBtn.addEventListener("click", () => {
-  logEl.innerHTML = "";
-  showToast("Console cleared");
-});
-
-themeToggleEl.addEventListener("click", toggleTheme);
-
-// Navigation pills tab switcher
-navPills.forEach((pill) => {
-  pill.addEventListener("click", () => {
-    navPills.forEach((p) => p.classList.remove("active"));
-    pill.classList.add("active");
-    const target = pill.getAttribute("data-tab");
-
-    if (target === "transfer") {
-      document.querySelector(".col-main").scrollIntoView({ behavior: "smooth" });
-    } else if (target === "rooms") {
-      document.getElementById("roomControlCard").scrollIntoView({ behavior: "smooth" });
-    } else if (target === "console") {
-      document.querySelector(".console-card").scrollIntoView({ behavior: "smooth" });
+  if (els.displayName) els.displayName.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const hasRoom = (els.roomId && els.roomId.value || "").trim();
+      if (hasRoom) onJoinRoom();
+      else onCreateRoom();
     }
   });
-});
-
-// QR Modal Dialog
-qrModalBtn.addEventListener("click", () => {
-  if (!state.roomId) return;
-  qrModalEl.hidden = false;
-});
-
-closeQrModalBtn.addEventListener("click", () => {
-  qrModalEl.hidden = true;
-});
-
-copyModalUrlBtn.addEventListener("click", () => {
-  navigator.clipboard.writeText(modalRoomUrlEl.value).then(() => showToast("URL copied!"));
-});
-
-qrModalEl.addEventListener("click", (e) => {
-  if (e.target === qrModalEl) {
-    qrModalEl.hidden = true;
-  }
-});
-
-// -------------------------------------------------------------
-// Lightweight SVG QR Code Generator (Pure Vanilla JS)
-// -------------------------------------------------------------
-function renderQrCode(text, targetEl, size = 140) {
-  if (!targetEl || !text) return;
-
-  // Simple, elegant QR code renderer using SVG data matrix
-  const cleanUrl = encodeURIComponent(text);
-  targetEl.innerHTML = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 25" width="${size}" height="${size}" shape-rendering="crispEdges">
-      <rect width="25" height="25" fill="#ffffff"/>
-      <!-- Outer positioning markers -->
-      <path d="M2,2 h7 v7 h-7 z M3,3 v5 h5 v-5 z M4,4 h3 v3 h-3 z" fill="#0f172a"/>
-      <path d="M16,2 h7 v7 h-7 z M17,3 v5 h5 v-5 z M18,4 h3 v3 h-3 z" fill="#0f172a"/>
-      <path d="M2,16 h7 v7 h-7 z M3,17 v5 h5 v-5 z M4,18 h3 v3 h-3 z" fill="#0f172a"/>
-      <!-- Simulated unique data matrix based on hash -->
-      ${generateQrSvgData(text)}
-    </svg>
-  `;
-}
-
-function generateQrSvgData(text) {
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = (hash << 5) - hash + text.charCodeAt(i);
-    hash |= 0;
-  }
-
-  let paths = "";
-  for (let r = 2; r < 23; r++) {
-    for (let c = 2; c < 23; c++) {
-      // Exclude position squares
-      if ((r <= 9 && c <= 9) || (r <= 9 && c >= 15) || (r >= 15 && c <= 9)) continue;
-      // Deterministic pseudo-random pattern based on text
-      const bit = Math.abs(Math.sin((r * 25 + c + hash) * 1.5)) > 0.48;
-      if (bit) {
-        paths += `<rect x="${c}" y="${r}" width="1" height="1" fill="#0f172a"/>`;
-      }
+  if (els.roomId) els.roomId.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onJoinRoom();
     }
+  });
+
+  if (els.pasteRoomBtn) els.pasteRoomBtn.addEventListener("click", async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) {
+        showToast("Clipboard is empty", "info");
+        return;
+      }
+      let candidate = text.trim();
+      if (candidate.includes("roomId=")) {
+        try {
+          candidate = new URL(candidate).searchParams.get("roomId") || candidate;
+        } catch (_) {}
+      }
+      if (els.roomId) els.roomId.value = candidate.trim();
+      showToast("Code pasted — hit Join room", "success");
+    } catch (_) {
+      showToast("Clipboard blocked — paste manually", "error");
+    }
+  });
+
+  const copyCode = () => copyText(state.roomId, "Room code copied!");
+  const copyLink = () => copyText(shareUrl(), "Invite link copied!");
+  if (els.bannerCopy) els.bannerCopy.addEventListener("click", copyCode);
+  if (els.bannerShare) els.bannerShare.addEventListener("click", copyLink);
+  if (els.copyShareLinkBtn) els.copyShareLinkBtn.addEventListener("click", copyLink);
+
+  const openQr = () => {
+    if (!isInRoom()) {
+      showToast("Create or join a room first", "error");
+      return;
+    }
+    if (els.qrModal) {
+      els.qrModal.hidden = false;
+      if (els.closeQrBtn) els.closeQrBtn.focus();
+    }
+  };
+  if (els.qrModalBtn) els.qrModalBtn.addEventListener("click", openQr);
+  if (els.bannerQr) els.bannerQr.addEventListener("click", openQr);
+  const closeQr = () => { if (els.qrModal) els.qrModal.hidden = true; };
+  if (els.closeQrBtn) els.closeQrBtn.addEventListener("click", closeQr);
+  if (els.qrModal) els.qrModal.addEventListener("click", (e) => { if (e.target === els.qrModal) closeQr(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && els.qrModal && !els.qrModal.hidden) closeQr();
+  });
+  if (els.copyModalUrlBtn) els.copyModalUrlBtn.addEventListener("click", () => copyText(els.modalUrl && els.modalUrl.value, "Link copied!"));
+
+  // Dropzone: click + keyboard + drag/drop (single-flight, no double-fire).
+  if (els.dropZone) {
+    els.dropZone.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      if (els.fileInput) els.fileInput.click();
+    });
+    els.dropZone.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        if (els.fileInput) els.fileInput.click();
+      }
+    });
+    ["dragenter", "dragover"].forEach((ev) => els.dropZone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      els.dropZone.classList.add("dragover");
+    }));
+    ["dragleave", "drop"].forEach((ev) => els.dropZone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      if (ev === "dragleave" && e.relatedTarget && els.dropZone.contains(e.relatedTarget)) return;
+      els.dropZone.classList.remove("dragover");
+    }));
+    els.dropZone.addEventListener("drop", (e) => {
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length && els.fileInput) {
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(files[0]);
+          els.fileInput.files = dt.files;
+        } catch (_) {
+          // read-only in some browsers; fall back to input click
+          showToast("Drop blocked — tap to choose instead", "error");
+          return;
+        }
+        handleFileSelected();
+      }
+    });
   }
-  return paths;
+  if (els.fileInput) els.fileInput.addEventListener("change", handleFileSelected);
+  if (els.cancelSelectBtn) els.cancelSelectBtn.addEventListener("click", () => {
+    if (els.fileInput) els.fileInput.value = "";
+    hidePreview();
+    renderState();
+  });
+  if (els.uploadBtn) els.uploadBtn.addEventListener("click", uploadFile);
+  if (els.abortBtn) els.abortBtn.addEventListener("click", () => abortUpload(false));
+
+  // File list: single delegated listener (no per-card leaks, XSS-safe).
+  if (els.fileList) els.fileList.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-action]");
+    if (!btn) return;
+    const { action, id } = btn.dataset;
+    if (action === "download") downloadFileById(id);
+    else if (action === "delete") deleteFileById(id);
+    else if (action === "copy-id") copyText(id, "File ID copied!");
+  });
+
+  if (els.fileSearch) els.fileSearch.addEventListener("input", () => {
+    state.searchQuery = els.fileSearch.value || "";
+    renderFiles();
+  });
+
+  if (els.themeToggle) els.themeToggle.addEventListener("click", () => {
+    const cur = document.documentElement.getAttribute("data-theme") || "dark";
+    applyTheme(cur === "dark" ? "light" : "dark");
+  });
+
+  window.addEventListener("online", () => {
+    if (state.rejoinIntent && !state.connected) {
+      state.reconnectAttempts = 0;
+      ensureConnected().catch(() => {});
+    }
+  });
 }
 
-// -------------------------------------------------------------
-// Initialization
-// -------------------------------------------------------------
 function initFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const queryRoom = params.get("roomId") || params.get("room");
-  const hashRoom = window.location.hash ? window.location.hash.replace(/^#/, "") : "";
-  const initialRoom = queryRoom || hashRoom;
-
-  if (initialRoom) {
-    roomIdEl.value = initialRoom;
-    log("INFO", `Room prefilled from URL: ${initialRoom}`);
-    showToast(`Room prefilled: ${initialRoom}`);
-  }
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("roomId") || params.get("room");
+    const hash = window.location.hash ? window.location.hash.replace(/^#/, "") : "";
+    const initial = q || hash;
+    if (initial && els.roomId) {
+      els.roomId.value = initial;
+      showToast("Room code filled in — enter your name and hit Join", "info");
+      setTimeout(() => { if (els.displayName) els.displayName.focus(); }, 300);
+    }
+  } catch (_) {}
 }
 
+/* ---------- boot ---------- */
 applyTheme(getPreferredTheme());
-setWsStatus("disconnected");
+setStatus("offline");
+wire();
 initFromUrl();
 renderState();
-log("SUCCESS", "SocketDrop UI ready • Telemetry active");
+
+})();

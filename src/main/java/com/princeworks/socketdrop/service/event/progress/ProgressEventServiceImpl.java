@@ -40,10 +40,16 @@ public class ProgressEventServiceImpl implements ProgressEventService {
 	  return;
 	}
 
+	// Snapshot alreadyimmutable from RoomRegistry; defensive copy guards
+	// against registry swap mid-loop. One slow client must not break fan-out.
 	for (String sessionId : roomRegistry.getSessions(roomId)) {
-	  WebSocketSession session = sessionRegistry.getSocket(sessionId);
-	  if (session != null) {
-		webSocketMessagingService.sendToSession(session, payload);
+	  try {
+	    WebSocketSession session = sessionRegistry.getSocket(sessionId);
+	    if (session != null) {
+	      webSocketMessagingService.sendToSession(session, payload);
+	    }
+	  } catch (Exception ignored) {
+	    // Per-session failure is isolated; continue to remaining peers.
 	  }
 	}
   }
