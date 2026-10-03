@@ -68,6 +68,12 @@ const els = {
   bannerShare: $("bannerShareBtn"),
   bannerQr: $("bannerQrBtn"),
   bannerLeave: $("bannerLeaveBtn"),
+  peerName: $("peerName"),
+  regenPeerBtn: $("regenPeerBtn"),
+  shareCodeBig: $("shareCodeBig"),
+  copyCodeBtn: $("copyCodeBtn"),
+  modalRoomCode: $("modalRoomCode"),
+  lanHint: $("lanHint"),
   // compat (hidden)
   currentRoom: $("currentRoom"),
   metricUser: $("metricUser"),
@@ -120,6 +126,37 @@ function extOf(name) {
   const dot = base.lastIndexOf(".");
   if (dot < 0 || dot === base.length - 1) return "FILE";
   return base.slice(dot + 1).toUpperCase().slice(0, 4);
+}
+
+/* ---------- auto peer name (no prompt, computer-name-like) ----------
+   Browser JS cannot read OS computer name (privacy sandbox).
+   Closest easy UX: stable friendly device label, persisted per browser.
+   Looks like "Crimson-Fox-42", survives reloads, zero typing. */
+const PEER_KEY = "socketdrop-peer";
+const PEER_ADJ = ["Swift","Bright","Crimson","Misty","Neon","Quiet","Bold","Amber","Cobalt","Sunny","Frost","Ember","Lunar","Solar","Turbo","Gentle","Rapid","Calm","Vivid","Nimble"];
+const PEER_ANIMAL = ["Fox","Eagle","Otter","Wolf","Bear","Hawk","Lynx","Tiger","Falcon","Whale","Raven","Panda","Koala","Zebra","Jaguar","Bison","Cobra","Dove","Moose","Seal"];
+function randomPeerName() {
+  const a = PEER_ADJ[Math.floor(Math.random() * PEER_ADJ.length)];
+  const b = PEER_ANIMAL[Math.floor(Math.random() * PEER_ANIMAL.length)];
+  const n = Math.floor(10 + Math.random() * 89);
+  return `${a}-${b}-${n}`;
+}
+function getPeerName() {
+  try {
+    let v = localStorage.getItem(PEER_KEY);
+    if (v && v.trim()) return v.trim().slice(0, 32);
+  } catch (_) {}
+  const gen = randomPeerName();
+  try { localStorage.setItem(PEER_KEY, gen); } catch (_) {}
+  return gen;
+}
+function setPeerName(v) {
+  const clean = String(v || "").trim().slice(0, 32) || randomPeerName();
+  try { localStorage.setItem(PEER_KEY, clean); } catch (_) {}
+  state.displayName = clean;
+  if (els.displayName) els.displayName.value = clean;
+  renderState();
+  return clean;
 }
 
 function showToast(message, type = "info") {
@@ -350,12 +387,13 @@ function unlockAction() {
   if (state.pendingTimer) { clearTimeout(state.pendingTimer); state.pendingTimer = null; }
 }
 
-function currentDisplayName(fallbackPrefix = "Guest") {
-  const v = (els.displayName && els.displayName.value || "").trim();
-  if (v) return v.slice(0, 32);
-  const gen = `${fallbackPrefix} ${Math.floor(100 + Math.random() * 900)}`;
-  if (els.displayName) els.displayName.value = gen;
-  return gen;
+function currentDisplayName() {
+  // No prompt: always use persisted auto peer name.
+  if (state.displayName && state.displayName.trim()) return state.displayName;
+  const peer = getPeerName();
+  state.displayName = peer;
+  if (els.displayName) els.displayName.value = peer;
+  return peer;
 }
 
 async function onCreateRoom() {
@@ -378,15 +416,24 @@ async function onCreateRoom() {
   }
 }
 
+function normalizeRoomCode(v) {
+  const t = String(v || "").trim();
+  if (!t) return "";
+  // Short 4-8 char codes case-insensitive; legacy room_* exact.
+  if (t.length <= 8 && /^[A-Za-z0-9]{4,8}$/.test(t)) return t.toUpperCase();
+  return t;
+}
+
 async function onJoinRoom() {
   if (state.pendingAction) return;
   if (isInRoom()) {
     showToast("You are already in a room — leave first to join another", "info");
     return;
   }
-  const roomId = (els.roomId && els.roomId.value || "").trim();
+  const roomId = normalizeRoomCode(els.roomId && els.roomId.value);
+  if (els.roomId && roomId) els.roomId.value = roomId;
   if (!roomId) {
-    showToast("Paste a room code first, or create a new room", "error");
+    showToast("Type the 6-letter code first, or create a new room", "error");
     if (els.roomId) els.roomId.focus();
     return;
   }
@@ -552,7 +599,8 @@ function renderState() {
   const inRoom = isInRoom();
   const busy = Boolean(state.pendingAction);
 
-  if (els.currentUser) els.currentUser.textContent = state.displayName || (state.userId ? "Guest" : "Guest");
+  if (els.currentUser) els.currentUser.textContent = state.displayName || "Guest";
+  if (els.peerName) els.peerName.textContent = state.displayName || "…";
   if (els.userAvatar) els.userAvatar.textContent = getInitials(state.displayName || state.userId);
   if (els.currentRoom) els.currentRoom.textContent = state.roomId || "";
   if (els.metricUser) els.metricUser.textContent = state.userId || "Guest";
@@ -567,7 +615,7 @@ function renderState() {
     if (inRoom) els.roomPrompt.textContent = `You are in as ${state.displayName}. Share the link below.`;
     else if (busy) els.roomPrompt.textContent = state.pendingAction === "create" ? "Creating your room…" : "Joining room…";
     else if (state.rejoinIntent || (!state.connected && state.roomId)) els.roomPrompt.textContent = "Reconnecting… keep this tab open.";
-    else els.roomPrompt.textContent = "Enter your name, then create a new room or join with a code.";
+    else els.roomPrompt.textContent = "Create a new room or join with a code. No name needed.";
   }
   if (els.joinHint) {
     if (inRoom) els.joinHint.textContent = "Room is live — invite others with the link or QR.";
@@ -587,9 +635,16 @@ function renderState() {
   const url = shareUrl();
   if (els.shareLinkInput && inRoom) els.shareLinkInput.value = url;
   if (els.modalUrl && inRoom) els.modalUrl.value = url;
+  if (els.shareCodeBig) els.shareCodeBig.textContent = inRoom ? state.roomId : "– – –";
+  if (els.modalRoomCode) els.modalRoomCode.textContent = inRoom ? state.roomId : "– – –";
+  if (els.lanHint) {
+    const host = window.location.hostname || "";
+    const isLocal = host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "";
+    els.lanHint.hidden = !(inRoom && isLocal);
+  }
   if (inRoom) {
-    renderQrInto(els.qrContainer, url, 132);
-    renderQrInto(els.modalQr, url, 208);
+    renderQrInto(els.qrContainer, url, 160);
+    renderQrInto(els.modalQr, url, 232);
   }
 
   // Buttons: single source of truth, no desync.
@@ -602,11 +657,11 @@ function renderState() {
     els.uploadBtn.disabled = !inRoom || !hasFile || state.uploading;
   }
 
-  // Steps indicator
+  // Steps indicator (2 steps now: room -> share)
   document.querySelectorAll(".step").forEach((el) => {
     const n = Number(el.getAttribute("data-step"));
-    el.classList.toggle("done", inRoom || (n === 1 && Boolean(state.displayName)));
-    el.classList.toggle("active", !inRoom && ((n === 1 && !state.displayName) || (n === 2 && Boolean(state.displayName))));
+    el.classList.toggle("done", inRoom);
+    el.classList.toggle("active", !inRoom && n === 1);
   });
 
   renderFiles();
@@ -896,19 +951,19 @@ function wire() {
   if (els.leaveRoomBtn) els.leaveRoomBtn.addEventListener("click", onLeaveRoom);
   if (els.bannerLeave) els.bannerLeave.addEventListener("click", onLeaveRoom);
 
-  if (els.displayName) els.displayName.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const hasRoom = (els.roomId && els.roomId.value || "").trim();
-      if (hasRoom) onJoinRoom();
-      else onCreateRoom();
-    }
-  });
   if (els.roomId) els.roomId.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       onJoinRoom();
     }
+  });
+  if (els.regenPeerBtn) els.regenPeerBtn.addEventListener("click", () => {
+    if (isInRoom()) {
+      showToast("Leave the room to change your name", "info");
+      return;
+    }
+    setPeerName(randomPeerName());
+    showToast(`You are now ${state.displayName}`, "success");
   });
 
   if (els.pasteRoomBtn) els.pasteRoomBtn.addEventListener("click", async () => {
@@ -924,6 +979,7 @@ function wire() {
           candidate = new URL(candidate).searchParams.get("roomId") || candidate;
         } catch (_) {}
       }
+      candidate = normalizeRoomCode(candidate);
       if (els.roomId) els.roomId.value = candidate.trim();
       showToast("Code pasted — hit Join room", "success");
     } catch (_) {
@@ -931,11 +987,22 @@ function wire() {
     }
   });
 
-  const copyCode = () => copyText(state.roomId, "Room code copied!");
+  const copyCode = () => copyText(state.roomId, "Room code copied — send the 6 letters!");
   const copyLink = () => copyText(shareUrl(), "Invite link copied!");
   if (els.bannerCopy) els.bannerCopy.addEventListener("click", copyCode);
   if (els.bannerShare) els.bannerShare.addEventListener("click", copyLink);
   if (els.copyShareLinkBtn) els.copyShareLinkBtn.addEventListener("click", copyLink);
+  if (els.copyCodeBtn) els.copyCodeBtn.addEventListener("click", copyCode);
+  if (els.roomId) els.roomId.addEventListener("input", () => {
+    const pos = els.roomId.selectionStart;
+    const up = els.roomId.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+    // Only auto-format short codes, leave legacy room_* alone while typing.
+    if (/^[A-Za-z0-9]{0,8}$/.test(els.roomId.value.trim()) && !els.roomId.value.includes("_")) {
+      els.roomId.value = up;
+      try { els.roomId.setSelectionRange(pos, pos); } catch (_) {}
+    }
+    renderState();
+  });
 
   const openQr = () => {
     if (!isInRoom()) {
@@ -1039,14 +1106,15 @@ function initFromUrl() {
     const initial = q || hash;
     if (initial && els.roomId) {
       els.roomId.value = initial;
-      showToast("Room code filled in — enter your name and hit Join", "info");
-      setTimeout(() => { if (els.displayName) els.displayName.focus(); }, 300);
+      showToast("Room code filled in — hit Join room", "info");
     }
   } catch (_) {}
 }
 
 /* ---------- boot ---------- */
 applyTheme(getPreferredTheme());
+state.displayName = getPeerName();
+if (els.displayName) els.displayName.value = state.displayName;
 setStatus("offline");
 wire();
 initFromUrl();

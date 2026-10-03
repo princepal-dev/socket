@@ -66,24 +66,36 @@
     </header>
 
     <main class="app-layout narrow">
-      <section class="hero-simple">
-        <h1 class="hero-title">Send files in seconds</h1>
-        <p class="hero-desc">No sign-up. Create a room, share the link, drop files.</p>
+      <section class="hero-landing">
+        <div class="hero-copy">
+          <div class="hero-pill"><span class="pulse-dot"></span> Live • No sign-up • Auto-delete</div>
+          <h1 class="hero-title">Share files with anyone in seconds</h1>
+          <p class="hero-desc">SocketDrop creates instant rooms for file drops. Create a room, share a 6-letter code or QR, drop files up to 50&nbsp;MB. When everyone leaves, room closes and file list clears. Nothing to install, nothing to remember.</p>
+          <div class="hero-cta">
+            <a href="#roomControlCard" class="btn btn-lime btn-big"><span>Start sharing now</span></a>
+            <a href="#how" class="btn btn-outline btn-big"><span>How it works</span></a>
+          </div>
+          <div class="hero-stats">
+            <div class="hstat"><strong>6-letter</strong><span>room codes</span></div>
+            <div class="hstat"><strong>50 MB</strong><span>per file</span></div>
+            <div class="hstat"><strong>0</strong><span>sign-ups</span></div>
+            <div class="hstat"><strong>Auto</strong><span>room close</span></div>
+          </div>
+        </div>
+        <div class="hero-visual" aria-hidden="true">
+          <div class="mock-card">
+            <div class="mock-top"><span class="mock-dot"></span><span class="mock-dot"></span><span class="mock-dot"></span><span class="mock-url">socketdrop • room K7Q9XD</span></div>
+            <div class="mock-code-row"><span class="mock-code">K7Q9XD</span><span class="mock-live">● live</span></div>
+            <div class="mock-file"><span class="mock-ext">PDF</span><span class="mock-fname">pitch-deck.pdf</span><span class="mock-size">2.4 MB</span></div>
+            <div class="mock-file"><span class="mock-ext">JPG</span><span class="mock-fname">site-photos.zip</span><span class="mock-size">18 MB</span></div>
+            <div class="mock-bar"><span style="width:72%"></span></div>
+            <div class="mock-hint">Scan QR → join → download instantly</div>
+          </div>
+        </div>
+      </section>
 
-        <ol class="steps" aria-label="How it works">
-          <li class="step" data-step="1">
-            <span class="step-num" aria-hidden="true">1</span>
-            <span class="step-text">Name yourself</span>
-          </li>
-          <li class="step" data-step="2">
-            <span class="step-num" aria-hidden="true">2</span>
-            <span class="step-text">Create or join</span>
-          </li>
-          <li class="step" data-step="3">
-            <span class="step-num" aria-hidden="true">3</span>
-            <span class="step-text">Drop &amp; share</span>
-          </li>
-        </ol>
+      <section class="strip" aria-label="Highlights">
+        <span>⚡ Instant rooms</span><span>🔤 6-letter codes</span><span>📷 Scannable QR</span><span>🗑️ Auto-cleanup</span>
       </section>
 
       <section id="activeRoomBanner" class="active-room-banner" hidden>
@@ -126,34 +138,34 @@
               </div>
               <div>
                 <h2 class="card-title">Start sharing</h2>
-                <p id="roomPrompt" class="card-subtitle">Enter your name, then create a new room or join with a code.</p>
+                <p id="roomPrompt" class="card-subtitle">Create a new room or join with a code. No name needed.</p>
               </div>
             </div>
           </div>
 
           <div class="card-body">
-            <div class="input-grid">
-              <div class="form-field">
-                <label for="displayName">Your name</label>
-                <div class="input-wrapper">
-                  <input id="displayName" type="text" placeholder="e.g. Alice" maxlength="32" autocomplete="nickname" />
-                </div>
-              </div>
+            <div class="peer-row">
+              <span class="peer-label">You are</span>
+              <strong id="peerName" class="peer-name">…</strong>
+              <button id="regenPeerBtn" class="btn btn-xs btn-ghost" type="button" title="Get a new random name">↻ New</button>
+              <input id="displayName" type="hidden" value="" />
+            </div>
 
+            <div class="input-grid single">
               <div class="form-field">
-                <label for="roomId">Room code <span class="label-hint">(only to join)</span></label>
+                <label for="roomId">Room code <span class="label-hint">(6 letters — ask friend)</span></label>
                 <div class="input-wrapper has-action">
-                  <input id="roomId" type="text" placeholder="Paste code from a friend" autocomplete="off" spellcheck="false" />
+                  <input id="roomId" type="text" placeholder="e.g. K7Q9XD" autocomplete="off" spellcheck="false" maxlength="8" class="code-input" />
                   <button id="pasteRoomBtn" class="input-action-btn" type="button">Paste</button>
                 </div>
               </div>
             </div>
 
-            <div class="btn-group">
-              <button id="createRoomBtn" class="btn btn-lime" type="button">
+            <div class="btn-group big">
+              <button id="createRoomBtn" class="btn btn-lime btn-big" type="button">
                 <span>Create room</span>
               </button>
-              <button id="joinRoomBtn" class="btn btn-primary" type="button">
+              <button id="joinRoomBtn" class="btn btn-primary btn-big" type="button">
                 <span>Join room</span>
               </button>
               <button id="leaveRoomBtn" class="btn btn-danger" type="button" hidden>
@@ -183,19 +195,28 @@
             </div>
           </div>
           <div class="card-body">
+            <div class="room-code-hero">
+              <span class="room-code-label">Room code</span>
+              <strong id="shareCodeBig" class="room-code-big">– – –</strong>
+              <button id="copyCodeBtn" class="btn btn-xs btn-outline" type="button">Copy code</button>
+            </div>
             <div class="share-row">
               <input id="shareLinkInput" type="text" readonly value="" aria-label="Shareable room link" placeholder="Room link appears here" />
               <button id="copyShareLinkBtn" class="btn btn-sm btn-lime" type="button">Copy link</button>
               <button id="qrModalBtn" class="btn btn-sm btn-outline" type="button">Show QR</button>
             </div>
             <div class="share-split">
-              <div id="qrCodeContainer" class="qr-preview-box" aria-label="Room QR code"></div>
+              <div>
+                <div id="qrCodeContainer" class="qr-preview-box" aria-label="Room QR code"></div>
+                <p class="qr-caption">Scan with phone camera.<br />Code not working? Type the 6-letter code manually.</p>
+              </div>
               <ul class="share-tips">
-                <li>Send the link in any chat app</li>
-                <li>QR works great for phones nearby</li>
+                <li>Send the link or 6-letter code in any chat</li>
+                <li>QR needs real domain/HTTPS — localhost links won't open on phones</li>
                 <li>Room closes when everyone leaves</li>
               </ul>
             </div>
+            <p id="lanHint" class="hint-line warn" hidden>Testing on localhost? Phone can't open localhost link — use same Wi-Fi + your computer LAN IP, or just type the code.</p>
           </div>
         </section>
 
@@ -289,9 +310,51 @@
         </section>
       </div>
 
+      <section id="how" class="landing-section">
+        <h2 class="section-title">How SocketDrop works</h2>
+        <p class="section-sub">Three taps. No accounts. No clutter.</p>
+        <div class="how-grid">
+          <div class="how-card"><span class="how-num">1</span><h3>Create a room</h3><p>One tap gives you a live room with a short 6-letter code like <code>K7Q9XD</code>. No name, no form.</p></div>
+          <div class="how-card"><span class="how-num">2</span><h3>Share code or QR</h3><p>Send link in any chat, show QR to phones nearby, or just read out 6 letters. Joining takes seconds.</p></div>
+          <div class="how-card"><span class="how-num">3</span><h3>Drop files, done</h3><p>Drag a file or tap to choose. Everyone in room sees it instantly with real progress. Up to 50 MB per file.</p></div>
+        </div>
+      </section>
+
+      <section class="landing-section">
+        <h2 class="section-title">Built for quick human moments</h2>
+        <p class="section-sub">Classrooms, offices, events, family — anywhere waiting on email or login kills flow.</p>
+        <div class="feat-grid">
+          <div class="feat"><span class="feat-ico">⚡</span><h3>Instant rooms</h3><p>Rooms live in memory only. Create and join over fast WebSockets, no database lag.</p></div>
+          <div class="feat"><span class="feat-ico">🔤</span><h3>6-letter codes</h3><p>Short, loud-friendly, case-insensitive. Read it out, type it fast, no typos.</p></div>
+          <div class="feat"><span class="feat-ico">📷</span><h3>Real QR codes</h3><p>Spec-correct quiet zone, big modules, white card. Phones scan first try on real domains.</p></div>
+          <div class="feat"><span class="feat-ico">📊</span><h3>Real progress</h3><p>True upload bytes, cancel anytime. No fake bars. Everyone gets STARTED / COMPLETED live.</p></div>
+          <div class="feat"><span class="feat-ico">🔒</span><h3>Room-locked files</h3><p>Downloads check room + membership. Path-safe storage, sanitized filenames, 50 MB caps.</p></div>
+          <div class="feat"><span class="feat-ico">🗑️</span><h3>Auto-cleanup</h3><p>Leave and room vanishes. No lingering links, no account to delete. Share and forget.</p></div>
+        </div>
+      </section>
+
+      <section class="landing-section split">
+        <div>
+          <h2 class="section-title">Phone in room in 10 seconds</h2>
+          <p class="section-sub">Best flow: laptop creates, phone scans or types code. Perfect for photos, PDFs, slides, zips on same Wi-Fi or internet.</p>
+          <ul class="share-tips">
+            <li>Teacher shares slides — students scan QR</li>
+            <li>Photographer drops previews — client downloads</li>
+            <li>Friends swap videos — no chat app limits</li>
+          </ul>
+          <a href="#roomControlCard" class="btn btn-lime"><span>Try it now — free</span></a>
+        </div>
+        <div class="mini-faq">
+          <details open><summary>Do I need an account?</summary><p>No. Name auto-assigned like Crimson-Fox-42. Just Create or Join.</p></details>
+          <details><summary>How big can files be?</summary><p>50 MB per file. One at a time for reliable progress.</p></details>
+          <details><summary>Where do files go?</summary><p>Server disk cache tied to room. Room closes when empty. Delete anytime.</p></details>
+          <details><summary>QR won't scan?</summary><p>On localhost phones can't open localhost links. Deploy with domain/HTTPS, or type 6-letter code manually.</p></details>
+        </div>
+      </section>
+
       <footer class="app-footer simple">
         <div class="footer-inner">
-          <span>Made for quick sharing • No sign-up • Rooms auto-close</span>
+          <span>SocketDrop • Send files fast • No sign-up • Rooms auto-close</span>
         </div>
       </footer>
     </main>
@@ -304,7 +367,7 @@
         </div>
         <div class="modal-body">
           <div id="modalQrCode" class="modal-qr-box"></div>
-          <p class="modal-help">Point any phone camera at the code.</p>
+          <p class="modal-help">Point any phone camera at the code.<br />Or type code <strong id="modalRoomCode">– – –</strong> manually.</p>
           <div class="modal-link-box">
             <input id="modalRoomUrl" type="text" readonly value="" aria-label="Room link" />
             <button id="copyModalUrlBtn" class="btn btn-sm btn-lime" type="button">Copy</button>

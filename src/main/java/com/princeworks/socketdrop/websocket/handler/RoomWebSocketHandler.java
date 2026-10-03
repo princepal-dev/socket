@@ -119,7 +119,18 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
       return;
     }
 
-    String roomId = IdGenerator.generateRoomId();
+    String roomId = null;
+    for (int attempt = 0; attempt < 5; attempt++) {
+      String candidate = IdGenerator.generateRoomId();
+      if (!roomRegistry.roomExists(candidate)) {
+        roomId = candidate;
+        break;
+      }
+    }
+    if (roomId == null) {
+      sendError(session, "Could not create room, try again");
+      return;
+    }
     String userId = IdGenerator.generateUsername();
 
     sessionRegistry.register(sessionId, new UserSessionInfo(userId, displayName.trim()));
@@ -136,13 +147,19 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
       return;
     }
 
-    String roomId = msg.getRoomId();
+    String rawRoomId = msg.getRoomId();
     String sessionId = session.getId();
 
-    if (roomId == null || roomId.trim().isEmpty()) {
+    if (rawRoomId == null || rawRoomId.trim().isEmpty()) {
       logger.warn("Room id cannot be blank");
       sendError(session, "roomId is required");
       return;
+    }
+
+    // Short codes are case-insensitive for easy typing; legacy room_* stay exact.
+    String roomId = rawRoomId.trim();
+    if (roomId.length() <= 8 && roomId.matches("(?i)^[a-z0-9]{4,8}$")) {
+      roomId = roomId.toUpperCase();
     }
 
     if (!roomRegistry.roomExists(roomId)) {

@@ -356,24 +356,30 @@ const QRCode = (function () {
   return {
     generateSvg: function (text, size = 180) {
       if (!text) return "";
-      let type = 3;
-      if (text.length > 34) type = 4;
-      if (text.length > 55) type = 5;
-      if (text.length > 80) type = 6;
-      if (text.length > 105) type = 7;
+      // Byte-mode capacity (Level L): pick smallest type that fits.
+      // Short room links (~30 chars) land in type 2-3, very scannable.
+      const len = text.length;
+      let type = 2;
+      if (len > 26) type = 3;
+      if (len > 44) type = 4;
+      if (len > 70) type = 5;
+      if (len > 100) type = 6;
+      if (len > 134) type = 7;
       const qr = new QRCodeModel(type, 0); // Level L
       qr.addData(text);
       qr.make();
       const count = qr.getModuleCount();
+      // Spec quiet zone = 4 modules each side. Was 2 -> scanners failed.
+      const QUIET = 4;
       let path = "";
       for (let r = 0; r < count; r++) {
         for (let c = 0; c < count; c++) {
           if (qr.isDark(r, c)) {
-            path += `M${c + 2},${r + 2}h1v1h-1z `;
+            path += `M${c + QUIET},${r + QUIET}h1v1h-1z `;
           }
         }
       }
-      const total = count + 4;
+      const total = count + QUIET * 2;
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" width="${size}" height="${size}" shape-rendering="crispEdges">
         <rect width="${total}" height="${total}" fill="#ffffff"/>
         <path d="${path}" fill="#0f172a"/>
