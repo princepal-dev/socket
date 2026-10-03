@@ -72,6 +72,29 @@ SocketDrop combines **Spring WebSocket** for event signaling and **Spring Web (R
               └─────────────┘
 ```
 
+### Room Self-Destruct
+
+Any member can wipe a room instantly. The server deletes every file owned by that room from disk,
+drops their metadata, broadcasts `ROOM_DESTROYED`, then closes every socket in the room — the
+initiator included. Nothing survives.
+
+```json
+{ "type": "DESTROY_ROOM" }
+```
+
+Server reply (broadcast to all peers, then sockets close with code `4001`):
+
+```json
+{
+  "type": "ROOM_DESTROYED",
+  "roomId": "K7Q9XD",
+  "deletedFiles": 3,
+  "message": "Room destroyed — 3 file(s) permanently deleted"
+}
+```
+
+---
+
 ### Event Sequence Diagram
 
 ```mermaid
@@ -172,6 +195,14 @@ Connect to `ws://localhost:8080/room` (or `wss://...` in production).
 }
 ```
 
+#### 4. Destroy Room (Self-Destruct)
+Deletes all room files from the server and kicks everyone out.
+```json
+{
+  "type": "DESTROY_ROOM"
+}
+```
+
 ### Server-to-Client Messages
 
 #### 1. Room Created
@@ -207,7 +238,17 @@ Connect to `ws://localhost:8080/room` (or `wss://...` in production).
 }
 ```
 
-#### 4. Error Message
+#### 4. Room Destroyed Broadcast
+```json
+{
+  "type": "ROOM_DESTROYED",
+  "roomId": "K7Q9XD",
+  "deletedFiles": 3,
+  "message": "Room destroyed — 3 file(s) permanently deleted"
+}
+```
+
+#### 5. Error Message
 ```json
 {
   "type": "ERROR",
@@ -226,6 +267,8 @@ SocketDrop implements defensive engineering practices:
 - **Thread-Safe WebSocket Delivery**: Sessions are wrapped with `ConcurrentWebSocketSessionDecorator` and synchronized message dispatching to eliminate Tomcat `TEXT_PARTIAL_WRITING` concurrency race conditions.
 - **HTTP Header Sanitization**: Content-Disposition headers are formatted according to RFC 5987 / 6266 with UTF-8 encoding, preventing carriage return injection and header splitting.
 - **Harmonized Size Limits**: Uniform 50MB file size ceiling configured consistently across multipart, application service, and HTTP download boundaries.
+- **Atomic Room Codes**: Room codes are claimed via an atomic `reserveRoom` operation, so two concurrent creators can never be handed the same code. A reserved-but-unjoined code stays invisible to joiners.
+- **Guaranteed Room Cleanup**: Self-destruct removes every file blob and its metadata for a room; a single undeletable entry cannot abort teardown.
 
 ---
 

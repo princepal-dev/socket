@@ -18,20 +18,30 @@ import com.princeworks.socketdrop.model.user.UserSessionInfo;
 import com.princeworks.socketdrop.response.room.ErrorResponse;
 import com.princeworks.socketdrop.response.room.RoomCreatedResponse;
 import com.princeworks.socketdrop.response.room.RoomJoinedResponse;
+import com.princeworks.socketdrop.service.event.presence.RoomPresenceService;
+import com.princeworks.socketdrop.service.event.progress.ProgressEventService;
+import com.princeworks.socketdrop.service.files.cleanup.FileCleanupService;
 import com.princeworks.socketdrop.util.IdGenerator;
 import com.princeworks.socketdrop.websocket.messging.WebSocketMessagingService;
 import com.princeworks.socketdrop.websocket.session.RoomRegistry;
 import com.princeworks.socketdrop.websocket.session.SessionRegistry;
+import org.springframework.web.socket.WebSocketSession;
 
 @Component
 public class RoomWebSocketHandler extends TextWebSocketHandler {
 
   private static final Logger logger = LoggerFactory.getLogger(RoomWebSocketHandler.class);
 
+  /** Custom close code so clients can tell "room destroyed" from a network drop. */
+  private static final int ROOM_DESTROYED_CLOSE_CODE = 4001;
+
   @Autowired private RoomRegistry roomRegistry;
   @Autowired private ObjectMapper objectMapper;
   @Autowired private SessionRegistry sessionRegistry;
   @Autowired private WebSocketMessagingService webSocketMessagingService;
+  @Autowired private FileCleanupService fileCleanupService;
+  @Autowired private ProgressEventService progressEventService;
+  @Autowired private RoomPresenceService roomPresenceService;
 
   @Override
   public void afterConnectionEstablished(WebSocketSession session) {
@@ -44,8 +54,11 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
   public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) {
     String sessionId = session.getId();
     logger.info("WS DISCONNECTED : {}", sessionId);
+    // Capture the room before unindexing so peers get an updated roster.
+    String roomId = roomRegistry.getRoom(sessionId);
     roomRegistry.leaveRoom(sessionId);
     sessionRegistry.unregister(sessionId);
+    roomPresenceService.notifyPresence(roomId);
   }
 
   @Override
@@ -53,8 +66,10 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     String sessionId = session.getId();
     logger.error(
         "ERROR while connecting to : {}, error message :{}", sessionId, exception.getMessage());
+    String roomId = roomRegistry.getRoom(sessionId);
     roomRegistry.leaveRoom(sessionId);
     sessionRegistry.unregister(sessionId);
+    roomPresenceService.notifyPresence(roomId);
   }
 
   @Override
@@ -83,6 +98,9 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
           break;
         case LEAVE_ROOM:
           handleLeaveRoom(session);
+          break;
+        case DESTROY_ROOM:
+          handleDestroyRoom(session);
           break;
         default:
           logger.info("Invalid TYPE provided!");
@@ -120,9 +138,10 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     }
 
     String roomId = null;
-    for (int attempt = 0; attempt < 5; attempt++) {
+    for (int attempt = 0; attempt < 10; attempt++) {
       String candidate = IdGenerator.generateRoomId();
-      if (!roomRegistry.roomExists(candidate)) {
+      // reserveRoom is atomic: no two creators can win the same code.
+      if (roomRegistry.reserveRoom(candidate)) {
         roomId = candidate;
         break;
       }
@@ -138,6 +157,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
 
     webSocketMessagingService.sendToSession(
         session, new RoomCreatedResponse(roomId, userId, displayName.trim()));
+    roomPresenceService.notifyPresence(roomId);
     logger.info("Room id created : {} successfully!", roomId);
   }
 
@@ -192,6 +212,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     roomRegistry.joinRoom(sessionId, roomId);
     webSocketMessagingService.sendToSession(
         session, new RoomJoinedResponse(roomId, userInfo.getUserId(), userInfo.getDisplayName()));
+    roomPresenceService.notifyPresence(roomId);
 
     // Logging success
     logger.info("Room id : {} joined successfully!", roomId);
@@ -199,13 +220,67 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
 
   private void handleLeaveRoom(WebSocketSession session) {
     String sessionId = session.getId();
+    String roomId = roomRegistry.getRoom(sessionId);
 
     // Leaving room & clearing user registration while preserving socket for re-joining
     roomRegistry.leaveRoom(sessionId);
     sessionRegistry.unregisterUser(sessionId);
 
+    // Tell the rest of the room the roster shrank.
+    roomPresenceService.notifyPresence(roomId);
+
     // Logging you have left room successfully
     logger.info("Session id : {} cleared successfully", sessionId);
+  }
+
+  /**
+   * Self-destruct: wipes every file owned by the caller's room, tells peers why, then kicks all
+   * sockets out including the initiator's.
+   *
+   * <p>Order matters — announce first so peers get a reason instead of a mystery socket close.
+   */
+  private void handleDestroyRoom(WebSocketSession session) {
+    String sessionId = session.getId();
+    String roomId = roomRegistry.getRoom(sessionId);
+
+    if (roomId == null) {
+      sendError(session, "You are not in a room");
+      return;
+    }
+
+    // Snapshot before mutating the registry.
+    var members = roomRegistry.getSessions(roomId);
+    if (members.isEmpty()) {
+      roomRegistry.evictRoom(roomId);
+      sendError(session, "Room is already empty");
+      return;
+    }
+
+    int deletedFiles = 0;
+    try {
+      deletedFiles = fileCleanupService.cleanupRoom(roomId);
+    } catch (RuntimeException e) {
+      logger.error("Room {} file cleanup failed: {}", roomId, e.getMessage());
+      sendError(session, "Could not delete room files — aborting destroy");
+      return;
+    }
+
+    progressEventService.notifyRoomDestroyed(roomId, deletedFiles);
+
+    for (String memberSessionId : members) {
+      WebSocketSession member = sessionRegistry.getSocket(memberSessionId);
+      roomRegistry.leaveRoom(memberSessionId);
+      sessionRegistry.unregister(memberSessionId);
+      webSocketMessagingService.closeSession(member, ROOM_DESTROYED_CLOSE_CODE, "Room destroyed");
+    }
+    roomRegistry.evictRoom(roomId);
+
+    logger.warn(
+        "Room {} DESTROYED by {} — {} file(s) deleted, {} peer(s) kicked",
+        roomId,
+        sessionId,
+        deletedFiles,
+        members.size());
   }
 
   private void sendError(WebSocketSession session, String message) {

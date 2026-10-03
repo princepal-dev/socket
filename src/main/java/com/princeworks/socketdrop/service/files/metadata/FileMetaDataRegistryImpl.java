@@ -3,6 +3,7 @@ package com.princeworks.socketdrop.service.files.metadata;
 import com.princeworks.socketdrop.model.file.FileMeta;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -34,5 +35,15 @@ public class FileMetaDataRegistryImpl implements FileMetaDataRegistry {
         if (fileId == null) return false;
         return fileRegistry.containsKey(fileId);
     }
-}
 
+    @Override
+    public List<FileMeta> findByRoomId(String roomId) {
+        if (roomId == null || roomId.trim().isEmpty()) {
+            return List.of();
+        }
+        // values() is weakly consistent; toList() snapshots it for safe iteration.
+        return fileRegistry.values().stream()
+                .filter(meta -> meta != null && roomId.equals(meta.getRoomId()))
+                .toList();
+    }
+}

@@ -2,12 +2,13 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SocketDrop — Send files in seconds</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>SocketDrop — send files in seconds</title>
     <meta
       name="description"
-      content="Create a room, share the link, drop files. No sign-up. Files disappear when everyone leaves."
+      content="Create a room, share the 6-letter code or QR, drop files up to 50 MB. No sign-up, nothing to install, files delete themselves."
     />
+    <meta name="color-scheme" content="dark light" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -16,381 +17,151 @@
     />
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body class="page-landing">
+    <a class="skip-link" href="#main">Skip to content</a>
+
     <header class="app-header">
       <div class="header-inner">
-        <a class="brand" href="/" aria-label="SocketDrop Home">
-          <div class="brand-badge" aria-hidden="true">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="icon-logo">
-              <path d="M12 2v8"></path>
-              <path d="m16 6-4 4-4-4"></path>
-              <rect width="18" height="8" x="3" y="14" rx="2"></rect>
-              <circle cx="7" cy="18" r="1" fill="currentColor"></circle>
-              <circle cx="17" cy="18" r="1" fill="currentColor"></circle>
+        <a class="brand" href="/" aria-label="SocketDrop home">
+          <span class="brand-badge" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2v8"></path><path d="m16 6-4 4-4-4"></path><rect width="18" height="8" x="3" y="14" rx="2"></rect>
+              <circle cx="7" cy="18" r="1" fill="currentColor"></circle><circle cx="17" cy="18" r="1" fill="currentColor"></circle>
             </svg>
-          </div>
-          <div class="brand-text">
+          </span>
+          <span class="brand-text">
             <span class="brand-name">SocketDrop</span>
-            <span class="brand-tag">Send files fast</span>
-          </div>
+            <span class="brand-tag">send files fast</span>
+          </span>
         </a>
 
         <div class="header-utils">
-          <div id="wsStatus" class="connection-pill disconnected" role="status" aria-live="polite" title="Connection status">
-            <span class="pulse-dot" aria-hidden="true"></span>
-            <span class="status-label">Offline</span>
-          </div>
-
-          <button id="themeToggle" class="util-btn" type="button" aria-label="Toggle color theme" title="Switch theme">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-sun" aria-hidden="true">
+          <button id="themeToggle" class="util-btn" type="button" aria-label="Switch color theme" title="Switch theme">
+            <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="4"></circle>
               <path d="M12 2v2"></path><path d="M12 20v2"></path>
               <path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path>
               <path d="M2 12h2"></path><path d="M20 12h2"></path>
               <path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>
             </svg>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-moon" aria-hidden="true">
+            <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
             </svg>
           </button>
-
-          <div class="user-chip">
-            <div id="userAvatar" class="avatar-circle" aria-hidden="true">SD</div>
-            <div class="user-details">
-              <span id="currentUser" class="user-name">Guest</span>
-              <span class="user-role">You</span>
-            </div>
-          </div>
+          <a class="btn btn-sm btn-outline header-cta" href="/app">Open app</a>
         </div>
       </div>
     </header>
 
-    <main class="app-layout narrow">
-      <section class="hero-landing">
-        <div class="hero-copy">
-          <div class="hero-pill"><span class="pulse-dot"></span> Live • No sign-up • Auto-delete</div>
-          <h1 class="hero-title">Share files with anyone in seconds</h1>
-          <p class="hero-desc">SocketDrop creates instant rooms for file drops. Create a room, share a 6-letter code or QR, drop files up to 50&nbsp;MB. When everyone leaves, room closes and file list clears. Nothing to install, nothing to remember.</p>
-          <div class="hero-cta">
-            <a href="#roomControlCard" class="btn btn-lime btn-big"><span>Start sharing now</span></a>
-            <a href="#how" class="btn btn-outline btn-big"><span>How it works</span></a>
-          </div>
-          <div class="hero-stats">
-            <div class="hstat"><strong>6-letter</strong><span>room codes</span></div>
-            <div class="hstat"><strong>50 MB</strong><span>per file</span></div>
-            <div class="hstat"><strong>0</strong><span>sign-ups</span></div>
-            <div class="hstat"><strong>Auto</strong><span>room close</span></div>
-          </div>
+    <main id="main" class="landing-layout">
+      <!-- ============================ HERO ============================ -->
+      <section class="hero">
+        <h1 class="hero-title">Send files in seconds</h1>
+        <p class="hero-sub">
+          Make a room, share the 6-letter code or QR, drop files up to 50&nbsp;MB. Everyone in the
+          room sees each file the moment it lands.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-lime btn-big" href="/app">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2v8"></path><path d="m16 6-4 4-4-4"></path><rect width="18" height="8" x="3" y="14" rx="2"></rect>
+              <circle cx="7" cy="18" r="1" fill="currentColor"></circle><circle cx="17" cy="18" r="1" fill="currentColor"></circle>
+            </svg>
+            <span>Start transfer</span>
+          </a>
         </div>
-        <div class="hero-visual" aria-hidden="true">
-          <div class="mock-card">
-            <div class="mock-top"><span class="mock-dot"></span><span class="mock-dot"></span><span class="mock-dot"></span><span class="mock-url">socketdrop • room K7Q9XD</span></div>
-            <div class="mock-code-row"><span class="mock-code">K7Q9XD</span><span class="mock-live">● live</span></div>
-            <div class="mock-file"><span class="mock-ext">PDF</span><span class="mock-fname">pitch-deck.pdf</span><span class="mock-size">2.4 MB</span></div>
-            <div class="mock-file"><span class="mock-ext">JPG</span><span class="mock-fname">site-photos.zip</span><span class="mock-size">18 MB</span></div>
-            <div class="mock-bar"><span style="width:72%"></span></div>
-            <div class="mock-hint">Scan QR → join → download instantly</div>
-          </div>
-        </div>
+        <ul class="trust" aria-label="Key facts">
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            Instant rooms
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            Deletes itself
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            Room-locked
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path></svg>
+            Any device
+          </li>
+        </ul>
       </section>
 
-      <section class="strip" aria-label="Highlights">
-        <span>⚡ Instant rooms</span><span>🔤 6-letter codes</span><span>📷 Scannable QR</span><span>🗑️ Auto-cleanup</span>
-      </section>
+      <!-- ====================== WHAT IT DOES ====================== -->
+      <section class="landing-section">
+        <h2 class="section-title">What SocketDrop does</h2>
+        <p class="section-sub">
+          A temporary room where everyone sees the same files. Nothing is saved to an account and
+          nothing is kept after the room closes.
+        </p>
 
-      <section id="activeRoomBanner" class="active-room-banner" hidden>
-        <div class="active-room-info">
-          <div class="active-room-badge">
-            <span class="active-pulse" aria-hidden="true"></span>
-            <span class="active-room-title">Room live</span>
-          </div>
-          <div class="active-room-details">
-            <span id="bannerRoomId" class="active-room-code">room_xyz</span>
-            <span class="active-room-divider" aria-hidden="true">•</span>
-            <span id="bannerUserBadge" class="active-user-badge">Guest</span>
-          </div>
-        </div>
-        <div class="active-room-actions">
-          <button id="bannerCopyBtn" class="btn btn-sm btn-outline" type="button">
-            <span>Copy code</span>
-          </button>
-          <button id="bannerShareBtn" class="btn btn-sm btn-outline" type="button">
-            <span>Copy link</span>
-          </button>
-          <button id="bannerQrBtn" class="btn btn-sm btn-outline" type="button">
-            <span>QR</span>
-          </button>
-          <button id="bannerLeaveBtn" class="btn btn-sm btn-danger" type="button">
-            <span>Leave</span>
-          </button>
-        </div>
-      </section>
-
-      <div class="stack">
-        <section id="roomControlCard" class="glass-card">
-          <div class="card-head">
-            <div class="card-title-group">
-              <div class="card-icon bg-lime-subtle" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-lime">
-                  <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                  <polyline points="9 22 9 12 15 12 15 22"></polyline>
-                </svg>
-              </div>
-              <div>
-                <h2 class="card-title">Start sharing</h2>
-                <p id="roomPrompt" class="card-subtitle">Create a new room or join with a code. No name needed.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="card-body">
-            <div class="peer-row">
-              <span class="peer-label">You are</span>
-              <strong id="peerName" class="peer-name">…</strong>
-              <button id="regenPeerBtn" class="btn btn-xs btn-ghost" type="button" title="Get a new random name">↻ New</button>
-              <input id="displayName" type="hidden" value="" />
-            </div>
-
-            <div class="input-grid single">
-              <div class="form-field">
-                <label for="roomId">Room code <span class="label-hint">(6 letters — ask friend)</span></label>
-                <div class="input-wrapper has-action">
-                  <input id="roomId" type="text" placeholder="e.g. K7Q9XD" autocomplete="off" spellcheck="false" maxlength="8" class="code-input" />
-                  <button id="pasteRoomBtn" class="input-action-btn" type="button">Paste</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="btn-group big">
-              <button id="createRoomBtn" class="btn btn-lime btn-big" type="button">
-                <span>Create room</span>
-              </button>
-              <button id="joinRoomBtn" class="btn btn-primary btn-big" type="button">
-                <span>Join room</span>
-              </button>
-              <button id="leaveRoomBtn" class="btn btn-danger" type="button" hidden>
-                <span>Leave</span>
-              </button>
-            </div>
-            <p id="joinHint" class="hint-line">You’ll get a link + QR to invite others.</p>
-          </div>
-        </section>
-
-        <section id="shareCard" class="glass-card" hidden>
-          <div class="card-head">
-            <div class="card-title-group">
-              <div class="card-icon bg-blue-subtle" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-blue">
-                  <circle cx="18" cy="5" r="3"></circle>
-                  <circle cx="6" cy="12" r="3"></circle>
-                  <circle cx="18" cy="19" r="3"></circle>
-                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-                </svg>
-              </div>
-              <div>
-                <h2 class="card-title">Invite others</h2>
-                <p class="card-subtitle">Anyone with the link joins instantly. No account.</p>
-              </div>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="room-code-hero">
-              <span class="room-code-label">Room code</span>
-              <strong id="shareCodeBig" class="room-code-big">– – –</strong>
-              <button id="copyCodeBtn" class="btn btn-xs btn-outline" type="button">Copy code</button>
-            </div>
-            <div class="share-row">
-              <input id="shareLinkInput" type="text" readonly value="" aria-label="Shareable room link" placeholder="Room link appears here" />
-              <button id="copyShareLinkBtn" class="btn btn-sm btn-lime" type="button">Copy link</button>
-              <button id="qrModalBtn" class="btn btn-sm btn-outline" type="button">Show QR</button>
-            </div>
-            <div class="share-split">
-              <div>
-                <div id="qrCodeContainer" class="qr-preview-box" aria-label="Room QR code"></div>
-                <p class="qr-caption">Scan with phone camera.<br />Code not working? Type the 6-letter code manually.</p>
-              </div>
-              <ul class="share-tips">
-                <li>Send the link or 6-letter code in any chat</li>
-                <li>QR needs real domain/HTTPS — localhost links won't open on phones</li>
-                <li>Room closes when everyone leaves</li>
-              </ul>
-            </div>
-            <p id="lanHint" class="hint-line warn" hidden>Testing on localhost? Phone can't open localhost link — use same Wi-Fi + your computer LAN IP, or just type the code.</p>
-          </div>
-        </section>
-
-        <section id="fileActionsSection" class="glass-card" hidden>
-          <div class="card-head">
-            <div class="card-title-group">
-              <div class="card-icon bg-emerald-subtle" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-emerald">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="17 8 12 3 7 8"></polyline>
-                  <line x1="12" y1="3" x2="12" y2="15"></line>
-                </svg>
-              </div>
-              <div>
-                <h2 class="card-title">Drop files</h2>
-                <p class="card-subtitle">Everyone in the room gets them instantly. Up to 50 MB.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="card-body">
-            <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Choose a file to share. You can also drag and drop.">
-              <input id="uploadFile" type="file" class="file-input-hidden" tabindex="-1" aria-hidden="true" />
-              <div class="drop-content" aria-hidden="true">
-                <div class="drop-icon-box">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-cloud-upload">
-                    <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
-                    <path d="M12 12v9"></path>
-                    <path d="m16 16-4-4-4 4"></path>
-                  </svg>
-                </div>
-                <div class="drop-text">
-                  <p class="drop-title"><span class="highlight">Tap to choose</span> or drag a file here</p>
-                  <p class="drop-hint">One file at a time • max 50 MB</p>
-                </div>
-              </div>
-            </div>
-
-            <div id="filePreviewBar" class="file-preview-bar" hidden>
-              <div class="file-info-preview">
-                <div class="file-icon-badge" aria-hidden="true"><span id="previewExt">FILE</span></div>
-                <div class="file-text-preview">
-                  <span id="previewFileName" class="preview-name">example.pdf</span>
-                  <span id="previewFileSize" class="preview-size">0 KB</span>
-                </div>
-              </div>
-              <div class="preview-actions">
-                <button id="cancelSelectBtn" class="btn btn-sm btn-ghost" type="button">Remove</button>
-                <button id="uploadBtn" class="btn btn-lime btn-sm" type="button">
-                  <span>Send file</span>
-                </button>
-              </div>
-            </div>
-
-            <div id="uploadProgressWrap" class="progress-wrap" hidden>
-              <div class="progress-label-row">
-                <span id="progressStatusText" class="progress-status">Sending…</span>
-                <span id="progressPercent" class="progress-pct">0%</span>
-              </div>
-              <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressTrack">
-                <div id="progressBar" class="progress-bar" style="width: 0%"></div>
-              </div>
-              <div class="progress-actions">
-                <button id="abortUploadBtn" class="btn btn-xs btn-ghost" type="button">Cancel send</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="filesListSection" class="glass-card" hidden>
-          <div class="card-head">
-            <div class="card-title-group">
-              <div>
-                <h2 class="card-title">Files in this room <span id="fileCountBadge" class="count-badge">0</span></h2>
-                <p class="card-subtitle">Tap Download to save. Files vanish when the room closes.</p>
-              </div>
-            </div>
-            <div class="card-actions">
-              <input id="fileSearchInput" type="search" placeholder="Search files…" aria-label="Search files" />
-            </div>
-          </div>
-
-          <div class="card-body">
-            <div id="filesEmptyState" class="empty-state">
-              <div class="empty-icon-box" aria-hidden="true">📁</div>
-              <h3 class="empty-title">No files yet</h3>
-              <p class="empty-desc">Drop your first file above, or wait for a friend to send one.</p>
-            </div>
-            <div id="fileItemsList" class="file-items-list" hidden></div>
-          </div>
-        </section>
-      </div>
-
-      <section id="how" class="landing-section">
-        <h2 class="section-title">How SocketDrop works</h2>
-        <p class="section-sub">Three taps. No accounts. No clutter.</p>
-        <div class="how-grid">
-          <div class="how-card"><span class="how-num">1</span><h3>Create a room</h3><p>One tap gives you a live room with a short 6-letter code like <code>K7Q9XD</code>. No name, no form.</p></div>
-          <div class="how-card"><span class="how-num">2</span><h3>Share code or QR</h3><p>Send link in any chat, show QR to phones nearby, or just read out 6 letters. Joining takes seconds.</p></div>
-          <div class="how-card"><span class="how-num">3</span><h3>Drop files, done</h3><p>Drag a file or tap to choose. Everyone in room sees it instantly with real progress. Up to 50 MB per file.</p></div>
-        </div>
+        <ol class="how-grid">
+          <li class="how-card">
+            <span class="how-num">1</span>
+            <h3>Make a room</h3>
+            <p>You get a 6-letter code like <code>K7Q9XD</code> and a QR code straight away.</p>
+          </li>
+          <li class="how-card">
+            <span class="how-num">2</span>
+            <h3>Share the code</h3>
+            <p>Send the link in a chat, read the 6 letters out loud, or let someone scan the QR.</p>
+          </li>
+          <li class="how-card">
+            <span class="how-num">3</span>
+            <h3>Drop files</h3>
+            <p>Everyone in the room gets each file the moment it finishes uploading.</p>
+          </li>
+        </ol>
       </section>
 
       <section class="landing-section">
-        <h2 class="section-title">Built for quick human moments</h2>
-        <p class="section-sub">Classrooms, offices, events, family — anywhere waiting on email or login kills flow.</p>
-        <div class="feat-grid">
-          <div class="feat"><span class="feat-ico">⚡</span><h3>Instant rooms</h3><p>Rooms live in memory only. Create and join over fast WebSockets, no database lag.</p></div>
-          <div class="feat"><span class="feat-ico">🔤</span><h3>6-letter codes</h3><p>Short, loud-friendly, case-insensitive. Read it out, type it fast, no typos.</p></div>
-          <div class="feat"><span class="feat-ico">📷</span><h3>Real QR codes</h3><p>Spec-correct quiet zone, big modules, white card. Phones scan first try on real domains.</p></div>
-          <div class="feat"><span class="feat-ico">📊</span><h3>Real progress</h3><p>True upload bytes, cancel anytime. No fake bars. Everyone gets STARTED / COMPLETED live.</p></div>
-          <div class="feat"><span class="feat-ico">🔒</span><h3>Room-locked files</h3><p>Downloads check room + membership. Path-safe storage, sanitized filenames, 50 MB caps.</p></div>
-          <div class="feat"><span class="feat-ico">🗑️</span><h3>Auto-cleanup</h3><p>Leave and room vanishes. No lingering links, no account to delete. Share and forget.</p></div>
+        <div class="fact-grid">
+          <div class="fact">
+            <h3>No sign-up</h3>
+            <p>You get a random name automatically. No email, no password, no profile.</p>
+          </div>
+          <div class="fact">
+            <h3>50 MB per file</h3>
+            <p>Send as many as you like. They upload one at a time so nothing fails halfway.</p>
+          </div>
+          <div class="fact">
+            <h3>Room-only access</h3>
+            <p>Downloads only work for people currently in the room. Leave and you lose access.</p>
+          </div>
+          <div class="fact">
+            <h3>Deletes itself</h3>
+            <p>Hit Destroy to wipe every file and kick everyone out, or leave and let the last
+              person out close it.</p>
+          </div>
+          <div class="fact">
+            <h3>Real progress</h3>
+            <p>Actual percentage, speed and time remaining. You can cancel any upload.</p>
+          </div>
+          <div class="fact">
+            <h3>Any device</h3>
+            <p>Phone, laptop or tablet. Same code, same room, same files.</p>
+          </div>
         </div>
       </section>
 
-      <section class="landing-section split">
-        <div>
-          <h2 class="section-title">Phone in room in 10 seconds</h2>
-          <p class="section-sub">Best flow: laptop creates, phone scans or types code. Perfect for photos, PDFs, slides, zips on same Wi-Fi or internet.</p>
-          <ul class="share-tips">
-            <li>Teacher shares slides — students scan QR</li>
-            <li>Photographer drops previews — client downloads</li>
-            <li>Friends swap videos — no chat app limits</li>
-          </ul>
-          <a href="#roomControlCard" class="btn btn-lime"><span>Try it now — free</span></a>
-        </div>
-        <div class="mini-faq">
-          <details open><summary>Do I need an account?</summary><p>No. Name auto-assigned like Crimson-Fox-42. Just Create or Join.</p></details>
-          <details><summary>How big can files be?</summary><p>50 MB per file. One at a time for reliable progress.</p></details>
-          <details><summary>Where do files go?</summary><p>Server disk cache tied to room. Room closes when empty. Delete anytime.</p></details>
-          <details><summary>QR won't scan?</summary><p>On localhost phones can't open localhost links. Deploy with domain/HTTPS, or type 6-letter code manually.</p></details>
-        </div>
+      <section class="landing-cta">
+        <h2 class="section-title">Ready when you are</h2>
+        <p class="section-sub">No account, nothing to install.</p>
+        <a class="btn btn-lime btn-big" href="/app">
+          <span>Start transfer</span>
+        </a>
       </section>
 
-      <footer class="app-footer simple">
-        <div class="footer-inner">
-          <span>SocketDrop • Send files fast • No sign-up • Rooms auto-close</span>
-        </div>
+      <footer class="app-footer">
+        <span>SocketDrop &middot; send files fast &middot; no sign-up &middot; rooms clean up after themselves</span>
       </footer>
     </main>
 
-    <div id="qrModal" class="modal-backdrop" hidden>
-      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="qrModalTitle">
-        <div class="modal-head">
-          <h3 id="qrModalTitle">Scan to join</h3>
-          <button id="closeQrModalBtn" class="btn-close" type="button" aria-label="Close">✕</button>
-        </div>
-        <div class="modal-body">
-          <div id="modalQrCode" class="modal-qr-box"></div>
-          <p class="modal-help">Point any phone camera at the code.<br />Or type code <strong id="modalRoomCode">– – –</strong> manually.</p>
-          <div class="modal-link-box">
-            <input id="modalRoomUrl" type="text" readonly value="" aria-label="Room link" />
-            <button id="copyModalUrlBtn" class="btn btn-sm btn-lime" type="button">Copy</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
-    <!-- Hidden compat nodes (legacy IDs referenced by old bookmarks/tests) -->
-    <span id="currentRoom" hidden></span>
-    <span id="metricUser" hidden></span>
-    <span id="fileCount" hidden>0</span>
-    <input id="fileIdInput" type="hidden" />
-    <button id="connectBtn" hidden type="button"></button>
-    <button id="downloadBtn" hidden type="button"></button>
-    <button id="deleteBtn" hidden type="button"></button>
-    <button id="shareLinkBtn" hidden type="button"></button>
-    <button id="copyRoomBtn" hidden type="button"></button>
-    <button id="copyModalUrlBtn2" hidden type="button"></button>
-
-    <script src="qr.js" defer></script>
-    <script src="app.js" defer></script>
+    <script src="landing.js" defer></script>
   </body>
 </html>

@@ -7,6 +7,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -69,6 +70,20 @@ public class GlobalExceptionHandler {
     error.put("timestamp", TimeUtils.now());
 
     return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+  }
+
+  /**
+   * Unknown paths (404) must not be reported as 500. The catch-all below would otherwise turn every
+   * missing static resource into an "unexpected error", which hides real outages from monitoring.
+   */
+  @ExceptionHandler(NoResourceFoundException.class)
+  public ResponseEntity<Map<String, Object>> handleNoResourceFoundException(
+      NoResourceFoundException e) {
+    Map<String, Object> error = new HashMap<>();
+    error.put("message", "Resource not found");
+    error.put("timestamp", TimeUtils.now());
+
+    return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
   }
 
   @ExceptionHandler(Exception.class)

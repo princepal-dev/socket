@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>SocketDrop — transfer</title>
+    <meta name="description" content="Create a room, share the code, drop files." />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="robots" content="noindex" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="page-app">
+    <a class="skip-link" href="#roomControlCard">Skip to the sharing app</a>
+    <div id="offlineBar" class="offline-bar" hidden role="status">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 2v8"></path><path d="m16 6-4 4-4-4"></path><rect width="18" height="8" x="3" y="14" rx="2"></rect>
+        <circle cx="7" cy="18" r="1" fill="currentColor"></circle><circle cx="17" cy="18" r="1" fill="currentColor"></circle>
+      </svg>
+      <span>You are offline — reconnecting</span>
+    </div>
+
+    <header class="app-header">
+      <div class="header-inner">
+        <a class="brand" href="/" aria-label="SocketDrop home">
+          <span class="brand-badge" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2v8"></path><path d="m16 6-4 4-4-4"></path><rect width="18" height="8" x="3" y="14" rx="2"></rect>
+              <circle cx="7" cy="18" r="1" fill="currentColor"></circle><circle cx="17" cy="18" r="1" fill="currentColor"></circle>
+            </svg>
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">SocketDrop</span>
+            <span class="brand-tag">send files fast</span>
+          </span>
+        </a>
+
+        <div class="header-utils">
+          <div id="wsStatus" class="connection-pill disconnected" role="status" aria-live="polite">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <span class="status-label">Offline</span>
+          </div>
+
+          <button id="themeToggle" class="util-btn" type="button" aria-label="Switch color theme" title="Switch theme">
+            <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2"></path><path d="M12 20v2"></path>
+              <path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path>
+              <path d="M2 12h2"></path><path d="M20 12h2"></path>
+              <path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>
+            </svg>
+            <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+            </svg>
+          </button>
+
+          <div class="user-chip">
+            <span id="userAvatar" class="avatar-circle" aria-hidden="true">SD</span>
+            <span class="user-details">
+              <span id="currentUser" class="user-name">Guest</span>
+              <span class="user-role">You</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-layout">
+      <!-- ======================= ROOM ACCESS ======================= -->
+      <section id="roomControlCard" class="glass-card app-card room-control">
+        <div class="card-head">
+          <div class="card-title-group">
+            <span class="card-icon bg-lime-subtle" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                <polyline points="9 22 9 12 15 12 15 22"></polyline>
+              </svg>
+            </span>
+            <div>
+              <h2 class="card-title">Start sharing</h2>
+              <p id="roomPrompt" class="card-subtitle">Create a room, or join one with a 6-letter code.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="peer-row">
+            <svg class="peer-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>
+            </svg>
+            <span class="peer-label">You are</span>
+            <strong id="peerName" class="peer-name">&hellip;</strong>
+            <button id="regenPeerBtn" class="btn btn-xs btn-ghost" type="button" title="Generate a different random name">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path>
+                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path>
+              </svg>
+              <span>Shuffle</span>
+            </button>
+            <input id="displayName" type="hidden" value="" />
+          </div>
+
+          <div class="mode-panel mode-create">
+            <button id="createRoomBtn" class="btn btn-lime btn-big btn-block" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line>
+              </svg>
+              <span>Create a new room</span>
+            </button>
+            <p class="mode-hint">You get a 6-letter code and a QR code to share.</p>
+          </div>
+
+          <div class="mode-divider"><span>or join someone else</span></div>
+
+          <div class="mode-panel mode-join">
+            <div class="form-field">
+              <label for="roomId" class="sr-only">Room code</label>
+              <div class="input-wrapper has-action">
+                <input
+                  id="roomId"
+                  class="code-input"
+                  type="text"
+                  placeholder="K7Q9XD"
+                  autocomplete="off"
+                  autocapitalize="characters"
+                  spellcheck="false"
+                  maxlength="8"
+                  aria-describedby="joinHint"
+                />
+                <button id="pasteRoomBtn" class="input-action-btn" type="button">Paste</button>
+              </div>
+            </div>
+            <button id="joinRoomBtn" class="btn btn-outline btn-big btn-block" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line>
+              </svg>
+              <span>Join room</span>
+            </button>
+            <p class="mode-hint">Type the 6 letters someone read out, or paste their link.</p>
+          </div>
+
+          <p id="joinHint" class="hint-line">
+            Rooms are temporary. When the last person leaves, every file is deleted.
+          </p>
+        </div>
+      </section>
+
+      <!-- ====================== STICKY ROOM BAR ====================== -->
+      <section id="roomBar" class="room-bar" hidden aria-label="Active room">
+        <div class="room-bar-main">
+          <span class="room-bar-badge">
+            <span class="active-pulse" aria-hidden="true"></span>
+            Live
+          </span>
+          <strong id="barRoomCode" class="room-bar-code">------</strong>
+          <button id="presenceChip" class="presence-chip" type="button" aria-live="polite" title="Who is in this room">
+            <span id="presenceAvatars" class="presence-avatars" aria-hidden="true"></span>
+            <span id="presenceLabel" class="presence-label">Just you</span>
+          </button>
+          <button id="barCopyCodeBtn" class="btn btn-xs btn-outline" type="button" title="Copy room code">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+            </svg>
+            <span>Copy code</span>
+          </button>
+        </div>
+        <div class="room-bar-actions">
+          <button id="barCopyLinkBtn" class="btn btn-sm btn-outline" type="button">Copy link</button>
+          <button id="barQrBtn" class="btn btn-sm btn-outline" type="button">QR</button>
+          <button id="barNativeShareBtn" class="btn btn-sm btn-primary" type="button" hidden>Share</button>
+          <button id="barLeaveBtn" class="btn btn-sm btn-ghost" type="button">Leave</button>
+          <button id="barDestroyBtn" class="btn btn-sm btn-danger-outline" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m12 2 2.4 6.2L21 9.3l-4.8 4.3 1.3 6.4-5.5-3.3-5.5 3.3 1.3-6.4L3 9.3l6.6-1.1z"></path>
+              <path d="M19 5 5 19"></path>
+            </svg>
+            <span>Destroy</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ============================ INVITE ============================ -->
+      <section id="shareCard" class="glass-card" hidden>
+        <div class="card-head">
+          <div class="card-title-group">
+            <span class="card-icon bg-blue-subtle" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+              </svg>
+            </span>
+            <div>
+              <h2 class="card-title">Invite people</h2>
+              <p class="card-subtitle">Send the link, read out the code, or let them scan.</p>
+            </div>
+          </div>
+        </div>
+        <div class="card-body invite-grid">
+          <div class="invite-left">
+            <div class="who-panel">
+              <div class="who-head">
+                <span class="who-title">In this room</span>
+                <span id="whoCount" class="count-badge">1</span>
+              </div>
+              <ul id="whoList" class="who-list"></ul>
+            </div>
+            <div class="share-row">
+              <input id="shareLinkInput" type="text" readonly value="" aria-label="Shareable room link" placeholder="Room link" />
+              <button id="copyShareLinkBtn" class="btn btn-sm btn-lime" type="button">Copy link</button>
+            </div>
+            <p id="lanHint" class="hint-line warn" hidden>
+              You are on localhost. A phone cannot open that address — use your computer's LAN IP, or
+              just type the 6-letter code.
+            </p>
+          </div>
+          <div class="invite-right">
+            <div id="qrCodeContainer" class="qr-preview-box" aria-label="Room QR code"></div>
+            <button id="downloadQrBtn" class="btn btn-xs btn-ghost" type="button">Save QR as image</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ UPLOAD ============================ -->
+      <section id="fileActionsSection" class="glass-card" hidden>
+        <div class="card-head">
+          <div class="card-title-group">
+            <span class="card-icon bg-emerald-subtle" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+            </span>
+            <div>
+              <h2 class="card-title">Send files</h2>
+              <p class="card-subtitle">Drop or pick as many as you like. Sent one by one so nothing breaks.</p>
+            </div>
+          </div>
+          <div class="card-actions">
+            <button id="clearQueueBtn" class="btn btn-xs btn-ghost" type="button" hidden>Clear finished</button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Choose files to send. You can also drag and drop.">
+            <input id="uploadFile" type="file" multiple class="file-input-hidden" tabindex="-1" aria-hidden="true" />
+            <div class="drop-content" aria-hidden="true">
+              <span class="drop-icon-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m16 16-4-4-4 4"></path>
+                </svg>
+              </span>
+              <p class="drop-title"><span class="highlight">Click to browse</span> or drag files anywhere</p>
+              <p class="drop-hint">Up to 50 MB each</p>
+            </div>
+          </div>
+
+          <ul id="uploadQueue" class="queue-list" hidden aria-live="polite"></ul>
+        </div>
+      </section>
+
+      <!-- ============================= FILES ============================= -->
+      <section id="filesListSection" class="glass-card" hidden>
+        <div class="card-head">
+          <div class="card-title-group">
+            <span class="card-icon bg-blue-subtle" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>
+              </svg>
+            </span>
+            <div>
+              <h2 class="card-title">
+                Files in this room <span id="fileCountBadge" class="count-badge">0</span>
+              </h2>
+              <p class="card-subtitle">Downloads stream straight to your device.</p>
+            </div>
+          </div>
+          <div class="card-actions files-tools">
+            <input id="fileSearchInput" type="search" placeholder="Search files" aria-label="Search files" />
+            <select id="fileSortSelect" aria-label="Sort files">
+              <option value="newest">Newest first</option>
+              <option value="name">Name A-Z</option>
+              <option value="size">Largest first</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div id="filesEmptyState" class="empty-state">
+            <span class="empty-icon-box" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>
+              </svg>
+            </span>
+            <h3 class="empty-title">No files yet</h3>
+            <p class="empty-desc">Drop one above, or wait for the room to send you something.</p>
+            <div class="empty-actions">
+              <button id="emptyPickBtn" class="btn btn-sm btn-lime" type="button">Choose a file</button>
+              <button id="emptyInviteBtn" class="btn btn-sm btn-outline" type="button">Invite someone</button>
+            </div>
+          </div>
+          <ul id="fileItemsList" class="file-list" hidden></ul>
+        </div>
+      </section>
+    </main>
+
+    <!-- ====================== CONFIRM DIALOG ====================== -->
+    <div id="confirmModal" class="modal-backdrop" hidden>
+      <div class="modal-card danger" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+        <div class="modal-head">
+          <h3 id="confirmTitle">Are you sure?</h3>
+          <button id="confirmCloseBtn" class="btn-close" type="button" aria-label="Close dialog">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <span class="confirm-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </span>
+          <p id="confirmText" class="confirm-text"></p>
+          <div id="confirmInputWrap" class="confirm-input-wrap" hidden>
+            <label for="confirmInput" id="confirmInputLabel">Type to confirm</label>
+            <input id="confirmInput" type="text" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="btn-group modal-actions">
+            <button id="confirmCancelBtn" class="btn btn-outline" type="button">Cancel</button>
+            <button id="confirmOkBtn" class="btn btn-danger" type="button">Confirm</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =========================== QR MODAL =========================== -->
+    <div id="qrModal" class="modal-backdrop" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="qrModalTitle">
+        <div class="modal-head">
+          <h3 id="qrModalTitle">Scan to join</h3>
+          <button id="closeQrModalBtn" class="btn-close" type="button" aria-label="Close dialog">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="modalQrCode" class="modal-qr-box"></div>
+          <p class="modal-help">
+            Or type the code <strong id="modalRoomCode" class="modal-code">------</strong>
+          </p>
+          <div class="modal-link-box">
+            <input id="modalRoomUrl" type="text" readonly value="" aria-label="Room link" />
+            <button id="copyModalUrlBtn" class="btn btn-sm btn-lime" type="button">Copy link</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================= PRESENCE MODAL ========================= -->
+    <div id="presenceModal" class="modal-backdrop" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="presenceModalTitle">
+        <div class="modal-head">
+          <h3 id="presenceModalTitle">In this room</h3>
+          <button id="presenceCloseBtn" class="btn-close" type="button" aria-label="Close dialog">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <ul id="presenceList" class="presence-list"></ul>
+          <p class="modal-help">Everyone here can see every file. Leaving removes you from this list.</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="dragOverlay" class="drag-overlay" hidden aria-hidden="true">
+      <div class="drag-overlay-inner">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v8"></path><path d="m16 6-4 4-4-4"></path><rect width="18" height="8" x="3" y="14" rx="2"></rect><circle cx="7" cy="18" r="1" fill="currentColor"></circle><circle cx="17" cy="18" r="1" fill="currentColor"></circle></svg>
+        <p>Drop to send to this room</p>
+      </div>
+    </div>
+
+    <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+    <script src="qr.js" defer></script>
+    <script src="app.js" defer></script>
+  </body>
+</html>
