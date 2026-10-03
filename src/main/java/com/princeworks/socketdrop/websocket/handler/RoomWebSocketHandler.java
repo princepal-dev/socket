@@ -63,7 +63,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
       String sessionId = session.getId();
       BaseMessage baseMessage = objectMapper.readValue(message.getPayload(), BaseMessage.class);
 
-      if (baseMessage.getType() == null) {
+      if (baseMessage == null || baseMessage.getType() == null) {
         logger.info(
             "No TYPE is found in the session {} & payload {}", sessionId, message.getPayload());
         sendError(session, "Missing message type");
@@ -92,10 +92,18 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     } catch (JsonProcessingException e) {
       logger.error("ERROR in Json processing : {}", e.getMessage());
       sendError(session, "Malformed message payload");
+    } catch (Exception e) {
+      logger.error("ERROR processing message : {}", e.getMessage(), e);
+      sendError(session, "Internal error processing message");
     }
   }
 
   private void handleCreateRoom(WebSocketSession session, CreateRoomMessage msg) {
+    if (msg == null) {
+      sendError(session, "Malformed message payload");
+      return;
+    }
+
     String sessionId = session.getId();
     String displayName = msg.getDisplayName();
 
@@ -114,19 +122,28 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     String roomId = IdGenerator.generateRoomId();
     String userId = IdGenerator.generateUsername();
 
-    sessionRegistry.register(sessionId, new UserSessionInfo(userId, displayName));
+    sessionRegistry.register(sessionId, new UserSessionInfo(userId, displayName.trim()));
     roomRegistry.joinRoom(sessionId, roomId);
 
-        webSocketMessagingService.sendToSession(
-                session, new RoomCreatedResponse(roomId, userId, displayName));
+    webSocketMessagingService.sendToSession(
+        session, new RoomCreatedResponse(roomId, userId, displayName.trim()));
     logger.info("Room id created : {} successfully!", roomId);
   }
 
   private void handleJoinRoom(WebSocketSession session, JoinRoomMessage msg) {
+    if (msg == null) {
+      sendError(session, "Malformed message payload");
+      return;
+    }
+
     String roomId = msg.getRoomId();
     String sessionId = session.getId();
-    String userId = IdGenerator.generateUsername();
-    UserSessionInfo userInfo = new UserSessionInfo(userId, msg.getDisplayName());
+
+    if (roomId == null || roomId.trim().isEmpty()) {
+      logger.warn("Room id cannot be blank");
+      sendError(session, "roomId is required");
+      return;
+    }
 
     if (!roomRegistry.roomExists(roomId)) {
       logger.warn("You are trying to join a room id : {} which doesn't exist", roomId);
@@ -146,6 +163,9 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
       return;
     }
 
+    String userId = IdGenerator.generateUsername();
+    UserSessionInfo userInfo = new UserSessionInfo(userId, msg.getDisplayName().trim());
+
     // Logging the info
     logger.info(
         "JOIN_ROOM from session : {}, user id : {}, room id : {}", sessionId, userId, roomId);
@@ -163,9 +183,9 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
   private void handleLeaveRoom(WebSocketSession session) {
     String sessionId = session.getId();
 
-    // Leaving room & clearing session
+    // Leaving room & clearing user registration while preserving socket for re-joining
     roomRegistry.leaveRoom(sessionId);
-    sessionRegistry.unregister(sessionId);
+    sessionRegistry.unregisterUser(sessionId);
 
     // Logging you have left room successfully
     logger.info("Session id : {} cleared successfully", sessionId);

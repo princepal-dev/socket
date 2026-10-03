@@ -34,25 +34,36 @@ public class FileStorageServiceImpl implements FileStorageService {
 
   @Override
   public UploadResponse uploadFile(MultipartFile file, String roomId) {
+    if (file == null || file.isEmpty()) {
+      throw new InvalidArgumentException("File is required", "uploadFile");
+    }
+
     if (!FileUtils.sizeCheck(file.getSize(), allowedSize)) {
       throw new InvalidArgumentException("You have exceeded the upload size limit", "uploadFile");
     }
 
     String fileId = IdGenerator.generateFileId();
     String originalFileName = file.getOriginalFilename();
+    if (originalFileName == null || originalFileName.trim().isEmpty()) {
+      originalFileName = fileId;
+    } else {
+      originalFileName = Paths.get(originalFileName).getFileName().toString();
+    }
+
+    Path filePath = FileUtils.generatePath(basePath, fileId);
 
     try {
-      // ensure base path exists
-      Path baseDir = Paths.get(basePath);
-      Files.createDirectories(baseDir);
+      Path baseDir = filePath.getParent();
+      if (baseDir != null && !Files.exists(baseDir)) {
+        Files.createDirectories(baseDir);
+      }
 
-      // resolve file path
-      Path filePath = baseDir.resolve(fileId);
-
-      // transfer the file
-      file.transferTo(filePath);
+      file.transferTo(filePath.toAbsolutePath());
     } catch (IOException e) {
-      throw new FileStorageException(basePath, Operation.UPLOAD, e);
+      try {
+        Files.deleteIfExists(filePath);
+      } catch (IOException ignored) {}
+      throw new FileStorageException("File upload failed", Operation.UPLOAD, e);
     }
 
     fileMetaDataRegistry.addRegistry(
@@ -68,7 +79,16 @@ public class FileStorageServiceImpl implements FileStorageService {
 
   @Override
   public StoredFile downloadFile(String fileId) {
-    Path filePath = Paths.get(basePath).resolve(fileId);
+    if (fileId == null || fileId.trim().isEmpty()) {
+      throw new InvalidArgumentException("File id is required", "downloadFile");
+    }
+
+    FileMeta metadata = fileMetaDataRegistry.getDataFromRegistry(fileId);
+    if (metadata == null) {
+      throw new ResourceNotFoundException("File metadata", "file id", fileId);
+    }
+
+    Path filePath = FileUtils.generatePath(basePath, fileId);
 
     if (!Files.exists(filePath)) {
       throw new ResourceNotFoundException("File", "file id", fileId);
@@ -76,18 +96,14 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     if (!Files.isReadable(filePath)) {
       throw new FileStorageException(
-          filePath.toString(), Operation.READ, new IOException("File is not readable"));
+          "File is not readable", Operation.READ, new IOException("File is not readable"));
     }
 
     try {
-      FileMeta metadata = fileMetaDataRegistry.getDataFromRegistry(fileId);
-      if (metadata == null) {
-        throw new ResourceNotFoundException("File metadata", "file id", fileId);
-      }
       return new StoredFile(
               metadata, new InputStreamResource(Files.newInputStream(filePath)));
     } catch (IOException e) {
-      throw new FileStorageException(filePath.toString(), Operation.READ, e);
+      throw new FileStorageException("File read failed", Operation.READ, e);
     }
   }
 
@@ -96,3 +112,4 @@ public class FileStorageServiceImpl implements FileStorageService {
     fileCleanupService.cleanupFile(fileId);
   }
 }
+

@@ -17,15 +17,20 @@ public class WebSocketMessagingService {
   }
 
   public void sendToSession(WebSocketSession session, Object payload) {
-    if (!session.isOpen()) {
+    if (session == null || !session.isOpen()) {
       return;
     }
 
     try {
       String json = objectMapper.writeValueAsString(payload);
-      session.sendMessage(new TextMessage(json));
+      synchronized (session) {
+        if (session.isOpen()) {
+          session.sendMessage(new TextMessage(json));
+        }
+      }
     } catch (Exception e) {
       logger.error("Error in sending messages to client : {}", e.getMessage());
     }
   }
 }
+

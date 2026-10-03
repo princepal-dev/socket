@@ -58,5 +58,74 @@ class RoomWebSocketHandlerTest {
 
     verify(messagingService, times(1)).sendToSession(any(WebSocketSession.class), any());
   }
+
+  @Test
+  void joinRoomWithoutRoomIdDoesNotCrashAndSendsError() {
+    RoomWebSocketHandler handler = new RoomWebSocketHandler();
+    RoomRegistry roomRegistry = new RoomRegistry();
+    SessionRegistry sessionRegistry = new SessionRegistry();
+    WebSocketMessagingService messagingService = Mockito.mock(WebSocketMessagingService.class);
+
+    ReflectionTestUtils.setField(handler, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(handler, "objectMapper", new ObjectMapper());
+    ReflectionTestUtils.setField(handler, "sessionRegistry", sessionRegistry);
+    ReflectionTestUtils.setField(handler, "webSocketMessagingService", messagingService);
+
+    WebSocketSession session = Mockito.mock(WebSocketSession.class);
+    when(session.getId()).thenReturn("s3");
+
+    handler.afterConnectionEstablished(session);
+    // Malformed: missing roomId
+    handler.handleTextMessage(session, new TextMessage("{\"type\":\"JOIN_ROOM\",\"displayName\":\"bob\"}"));
+
+    verify(messagingService, times(1)).sendToSession(any(WebSocketSession.class), any());
+  }
+
+  @Test
+  void nullJsonPayloadSendsErrorResponse() {
+    RoomWebSocketHandler handler = new RoomWebSocketHandler();
+    ReflectionTestUtils.setField(handler, "roomRegistry", new RoomRegistry());
+    ReflectionTestUtils.setField(handler, "objectMapper", new ObjectMapper());
+    ReflectionTestUtils.setField(handler, "sessionRegistry", new SessionRegistry());
+
+    WebSocketMessagingService messagingService = Mockito.mock(WebSocketMessagingService.class);
+    ReflectionTestUtils.setField(handler, "webSocketMessagingService", messagingService);
+
+    WebSocketSession session = Mockito.mock(WebSocketSession.class);
+    when(session.getId()).thenReturn("s4");
+
+    handler.handleTextMessage(session, new TextMessage("null"));
+
+    verify(messagingService, times(1)).sendToSession(any(WebSocketSession.class), any());
+  }
+
+  @Test
+  void leaveRoomPreservesSocketInSessionRegistry() {
+    RoomWebSocketHandler handler = new RoomWebSocketHandler();
+    RoomRegistry roomRegistry = new RoomRegistry();
+    SessionRegistry sessionRegistry = new SessionRegistry();
+    WebSocketMessagingService messagingService = Mockito.mock(WebSocketMessagingService.class);
+
+    ReflectionTestUtils.setField(handler, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(handler, "objectMapper", new ObjectMapper());
+    ReflectionTestUtils.setField(handler, "sessionRegistry", sessionRegistry);
+    ReflectionTestUtils.setField(handler, "webSocketMessagingService", messagingService);
+
+    WebSocketSession session = Mockito.mock(WebSocketSession.class);
+    when(session.getId()).thenReturn("s5");
+
+    handler.afterConnectionEstablished(session);
+    handler.handleTextMessage(session, new TextMessage("{\"type\":\"CREATE_ROOM\",\"displayName\":\"alice\"}"));
+
+    assertTrue(sessionRegistry.isRegistered("s5"));
+    assertNotNull(sessionRegistry.getSocket("s5"));
+
+    handler.handleTextMessage(session, new TextMessage("{\"type\":\"LEAVE_ROOM\"}"));
+
+    // User is unregistered from room, but socket is still preserved!
+    assertFalse(sessionRegistry.isRegistered("s5"));
+    assertNotNull(sessionRegistry.getSocket("s5"));
+  }
 }
+
 

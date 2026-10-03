@@ -1,104 +1,549 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SocketDrop</title>
+    <title>SocketDrop — Real-Time Room-First File Sharing</title>
+    <meta
+      name="description"
+      content="Instant, ephemeral peer-to-peer file sharing powered by Spring Boot and WebSockets. Zero database, zero storage tracking, lightning fast."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="container">
-      <header class="hero card">
-        <div>
-          <h1>SocketDrop</h1>
-          <p class="subtitle">Room-first real-time file sharing</p>
-        </div>
-        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle theme">
-          Light mode
-        </button>
-      </header>
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+      <div class="header-inner">
+        <!-- Brand Logo -->
+        <a class="brand" href="/" aria-label="SocketDrop Home">
+          <div class="brand-badge">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="icon-logo"
+            >
+              <path d="M12 2v8"></path>
+              <path d="m16 6-4 4-4-4"></path>
+              <rect width="18" height="8" x="3" y="14" rx="2"></rect>
+              <circle cx="7" cy="18" r="1" fill="currentColor"></circle>
+              <circle cx="17" cy="18" r="1" fill="currentColor"></circle>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-name">SocketDrop</span>
+            <span class="brand-tag">v1.0 • P2P</span>
+          </div>
+        </a>
 
-      <section class="card status-grid">
-        <article>
-          <p class="status-label">Connection</p>
-          <p id="wsStatus" class="status-pill disconnected">Disconnected</p>
-        </article>
-        <article>
-          <p class="status-label">Current Room</p>
-          <p id="currentRoom" class="status-value">-</p>
-        </article>
-        <article>
-          <p class="status-label">Current User</p>
-          <p id="currentUser" class="status-value">-</p>
-        </article>
-      </section>
+        <!-- Segmented Navigation Pills -->
+        <nav class="nav-pills" aria-label="Sections">
+          <button class="nav-pill active" data-tab="transfer" type="button">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-sm">
+              <path d="m22 11-1.296-1.296a2.4 2.4 0 0 0-3.408 0L11 16"></path>
+              <path d="M4 8a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2"></path>
+              <circle cx="13" cy="7" r="1" fill="currentColor"></circle>
+              <rect x="8" y="2" width="14" height="14" rx="2"></rect>
+            </svg>
+            <span>Transfer</span>
+          </button>
+          <button class="nav-pill" data-tab="rooms" type="button">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-sm">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+            <span>Room Hub</span>
+          </button>
+          <button class="nav-pill" data-tab="console" type="button">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-sm">
+              <polyline points="4 17 10 11 4 5"></polyline>
+              <line x1="12" x2="20" y1="19" y2="19"></line>
+            </svg>
+            <span>Telemetry</span>
+          </button>
+        </nav>
 
-      <section class="card">
-        <h2>Start Here</h2>
-        <p id="joinHint" class="hint">Create or join a room to unlock uploads and downloads.</p>
-        <p id="roomPrompt" class="prompt">Step 1: Connect. Step 2: Create a room or join one.</p>
+        <!-- Right Utilities -->
+        <div class="header-utils">
+          <!-- Connection Status Pill -->
+          <div id="wsStatus" class="connection-pill disconnected" title="WebSocket Status">
+            <span class="pulse-dot"></span>
+            <span class="status-label">Disconnected</span>
+          </div>
 
-        <div class="row">
-          <label for="displayName">Display Name</label>
-          <input id="displayName" type="text" placeholder="alice" />
-        </div>
-        <div class="row">
-          <label for="roomId">Room ID</label>
-          <input id="roomId" type="text" placeholder="room_xxx" />
-        </div>
-        <div class="actions">
-          <button id="connectBtn" type="button">Connect</button>
-          <button id="createRoomBtn" type="button">Create Room</button>
-          <button id="joinRoomBtn" type="button">Join Room</button>
-          <button id="leaveRoomBtn" type="button">Leave Room</button>
-        </div>
-      </section>
+          <!-- Theme Toggle -->
+          <button
+            id="themeToggle"
+            class="util-btn"
+            type="button"
+            aria-label="Toggle visual theme"
+            title="Switch color mode"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="icon-sun"
+            >
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2"></path>
+              <path d="M12 20v2"></path>
+              <path d="m4.93 4.93 1.41 1.41"></path>
+              <path d="m17.66 17.66 1.41 1.41"></path>
+              <path d="M2 12h2"></path>
+              <path d="M20 12h2"></path>
+              <path d="m6.34 17.66-1.41 1.41"></path>
+              <path d="m19.07 4.93-1.41 1.41"></path>
+            </svg>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="icon-moon"
+            >
+              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+            </svg>
+          </button>
 
-      <section id="fileActionsSection" class="card" hidden>
-        <h2>File Actions</h2>
-        <div class="split-grid">
-          <article class="sub-card">
-            <h3>Upload</h3>
-            <div class="row compact">
-              <label for="uploadFile">File</label>
-              <input id="uploadFile" type="file" />
+          <!-- User Badge -->
+          <div class="user-chip">
+            <div id="userAvatar" class="avatar-circle">SD</div>
+            <div class="user-details">
+              <span id="currentUser" class="user-name">Guest</span>
+              <span class="user-role">Peer Node</span>
             </div>
-            <div class="actions">
-              <button id="uploadBtn" type="button">Upload File</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-layout">
+      <!-- Hero Panel with Metric Cards -->
+      <section class="hero-panel">
+        <div class="hero-content">
+          <div class="hero-badge">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-zap">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            <span>Zero Persistence • In-Memory Signaling • 50MB Limit</span>
+          </div>
+          <h1 class="hero-title">Real-Time Room-First File Sharing</h1>
+          <p class="hero-desc">
+            Connect via WebSockets, enter an ephemeral room, and broadcast files with live streaming telemetry. Without database overhead or account friction.
+          </p>
+        </div>
+
+        <!-- 4 Hero Stat Cards -->
+        <div class="hero-metrics">
+          <article class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Active Room</span>
+              <button id="copyRoomBtn" class="mini-chip-btn" type="button" title="Copy Room ID">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-xs">
+                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+                </svg>
+                <span>Copy</span>
+              </button>
             </div>
+            <div id="currentRoom" class="metric-value">-</div>
+            <div class="metric-foot" id="joinHint">Join or create a room to start</div>
           </article>
 
-          <article class="sub-card">
-            <h3>Download / Delete</h3>
-            <div class="row compact">
-              <label for="fileIdInput">File ID</label>
-              <input id="fileIdInput" type="text" placeholder="file_xxx" />
+          <article class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Identity</span>
+              <span class="badge-lime">Ephemeral</span>
             </div>
-            <div class="actions">
-              <button id="downloadBtn" type="button">Download</button>
-              <button id="deleteBtn" type="button" class="danger">Delete</button>
+            <div id="metricUser" class="metric-value truncate">Guest</div>
+            <div class="metric-foot">Server-assigned secure ID</div>
+          </article>
+
+          <article class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Files Streamed</span>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-muted">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" x2="12" y1="3" y2="15"></line>
+              </svg>
             </div>
+            <div id="fileCount" class="metric-value">0</div>
+            <div class="metric-foot">Transfers this session</div>
+          </article>
+
+          <article class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Max Transfer Size</span>
+              <span class="badge-neutral">Limit</span>
+            </div>
+            <div class="metric-value">50 MB</div>
+            <div class="metric-foot">Multipart streaming safe</div>
           </article>
         </div>
       </section>
 
-      <section class="card">
-        <div class="log-header">
-          <h2>Event Log</h2>
-          <button id="clearLogBtn" type="button">Clear</button>
-        </div>
-        <pre id="log" class="log"></pre>
-      </section>
+      <!-- Main Dashboard Grid -->
+      <div class="dashboard-grid">
+        <!-- Left / Primary Column -->
+        <div class="col-main">
+          <!-- Room Action Card (If not connected or no room) -->
+          <section id="roomControlCard" class="glass-card">
+            <div class="card-head">
+              <div class="card-title-group">
+                <div class="card-icon bg-lime-subtle">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-lime">
+                    <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="card-title">Room Access</h2>
+                  <p id="roomPrompt" class="card-subtitle">Connect and create a new room or enter an existing Room ID</p>
+                </div>
+              </div>
+            </div>
 
-      <footer class="site-footer">
-        Created by Prince Pal with love. LinkedIn:
-        <a href="https://www.linkedin.com/in/princepal-dev/" target="_blank" rel="noopener noreferrer"
-          >https://www.linkedin.com/in/princepal-dev/</a
-        >
+            <div class="card-body">
+              <div class="input-grid">
+                <div class="form-field">
+                  <label for="displayName">Your Display Name</label>
+                  <div class="input-wrapper">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="field-icon">
+                      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <input id="displayName" type="text" placeholder="e.g. Alice" maxlength="32" autocomplete="off" />
+                  </div>
+                </div>
+
+                <div class="form-field">
+                  <label for="roomId">Room Identifier</label>
+                  <div class="input-wrapper">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="field-icon">
+                      <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+                      <path d="M7 7h10"></path>
+                      <path d="M7 12h10"></path>
+                      <path d="M7 17h10"></path>
+                    </svg>
+                    <input id="roomId" type="text" placeholder="e.g. room_7b31... (or leave blank to create)" autocomplete="off" />
+                    <button id="pasteRoomBtn" class="input-action-btn" type="button" title="Paste from clipboard">
+                      Paste
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="btn-group">
+                <button id="createRoomBtn" class="btn btn-lime" type="button">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-btn">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="16"></line>
+                    <line x1="8" y1="12" x2="16" y2="12"></line>
+                  </svg>
+                  <span>Create Room</span>
+                </button>
+                <button id="joinRoomBtn" class="btn btn-primary" type="button">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-btn">
+                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                    <polyline points="10 17 15 12 10 7"></polyline>
+                    <line x1="15" y1="12" x2="3" y2="12"></line>
+                  </svg>
+                  <span>Join Room</span>
+                </button>
+                <button id="connectBtn" class="btn btn-outline" type="button">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-btn">
+                    <path d="M5 12h14"></path>
+                    <path d="m12 5 7 7-7 7"></path>
+                  </svg>
+                  <span>Connect WS</span>
+                </button>
+                <button id="leaveRoomBtn" class="btn btn-danger" type="button" disabled>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-btn">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                  </svg>
+                  <span>Leave</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- File Upload & Sharing Zone -->
+          <section id="fileActionsSection" class="glass-card" hidden>
+            <div class="card-head">
+              <div class="card-title-group">
+                <div class="card-icon bg-blue-subtle">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-blue">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="card-title">Share Files in Room</h2>
+                  <p class="card-subtitle">Broadcast files to all peers in this room instantly</p>
+                </div>
+              </div>
+              <div class="card-actions">
+                <button id="shareLinkBtn" class="btn btn-sm btn-outline" type="button">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-xs">
+                    <circle cx="18" cy="5" r="3"></circle>
+                    <circle cx="6" cy="12" r="3"></circle>
+                    <circle cx="18" cy="19" r="3"></circle>
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                  </svg>
+                  <span>Share Link</span>
+                </button>
+                <button id="qrModalBtn" class="btn btn-sm btn-outline" type="button" title="Show QR Code">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-xs">
+                    <rect width="5" height="5" x="3" y="3" rx="1"></rect>
+                    <rect width="5" height="5" x="16" y="3" rx="1"></rect>
+                    <rect width="5" height="5" x="3" y="16" rx="1"></rect>
+                    <path d="M21 16h-3a2 2 0 0 0-2 2v3"></path>
+                    <path d="M21 21v.01"></path>
+                    <path d="M12 7v3a2 2 0 0 1-2 2H7"></path>
+                    <path d="M3 12h.01"></path>
+                    <path d="M12 3h.01"></path>
+                    <path d="M12 16v.01"></path>
+                    <path d="M16 12h1"></path>
+                    <path d="M21 12v.01"></path>
+                    <path d="M12 21v-1"></path>
+                  </svg>
+                  <span>QR Code</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <!-- Drag and Drop Zone -->
+              <div id="dropZone" class="drop-zone">
+                <input id="uploadFile" type="file" class="file-input-hidden" />
+                <div class="drop-content">
+                  <div class="drop-icon-box">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-cloud-upload">
+                      <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
+                      <path d="M12 12v9"></path>
+                      <path d="m16 16-4-4-4 4"></path>
+                    </svg>
+                  </div>
+                  <div class="drop-text">
+                    <p class="drop-title">
+                      <span class="highlight">Click to browse</span> or drag and drop files here
+                    </p>
+                    <p class="drop-hint">Supports all file formats up to 50 MB</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Selected File Preview Bar -->
+              <div id="filePreviewBar" class="file-preview-bar" hidden>
+                <div class="file-info-preview">
+                  <div class="file-icon-badge">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-file">
+                      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path>
+                      <path d="M14 2v4a2 2 0 0 0 2 2h4"></path>
+                    </svg>
+                  </div>
+                  <div class="file-text-preview">
+                    <span id="previewFileName" class="preview-name">example.pdf</span>
+                    <span id="previewFileSize" class="preview-size">0 KB</span>
+                  </div>
+                </div>
+                <div class="preview-actions">
+                  <button id="cancelSelectBtn" class="btn btn-sm btn-ghost" type="button">Cancel</button>
+                  <button id="uploadBtn" class="btn btn-lime btn-sm" type="button" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-xs">
+                      <path d="M12 3v12"></path>
+                      <path d="m17 8-5-5-5 5"></path>
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    </svg>
+                    <span>Upload & Broadcast</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Live Upload Progress Bar -->
+              <div id="uploadProgressWrap" class="progress-wrap" hidden>
+                <div class="progress-label-row">
+                  <span id="progressStatusText" class="progress-status">Uploading...</span>
+                  <span id="progressPercent" class="progress-pct">0%</span>
+                </div>
+                <div class="progress-track">
+                  <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Shared Files Hub -->
+          <section id="filesListSection" class="glass-card">
+            <div class="card-head">
+              <div class="card-title-group">
+                <div class="card-icon bg-emerald-subtle">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-emerald">
+                    <path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <path d="m3 15 2 2 4-4"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="card-title">Room Files & Downloads</h2>
+                  <p class="card-subtitle">Real-time repository of shared items in this room</p>
+                </div>
+              </div>
+
+              <!-- Quick File ID input fallback -->
+              <div class="quick-id-box">
+                <input id="fileIdInput" type="text" placeholder="Enter file_xxx manually" />
+                <button id="downloadBtn" class="btn btn-sm btn-primary" type="button" disabled>Download</button>
+                <button id="deleteBtn" class="btn btn-sm btn-danger" type="button" disabled>Delete</button>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <!-- Empty state -->
+              <div id="filesEmptyState" class="empty-state">
+                <div class="empty-icon-box">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="icon-empty">
+                    <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+                    <line x1="9" x2="15" y1="15" y2="15"></line>
+                    <line x1="9" x2="15" y1="9" y2="9"></line>
+                  </svg>
+                </div>
+                <h3 class="empty-title">No files shared yet</h3>
+                <p class="empty-desc">Upload a file or wait for room participants to share one.</p>
+              </div>
+
+              <!-- File Items Container -->
+              <div id="fileItemsList" class="file-items-list" hidden></div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Right / Secondary Column: Telemetry & Activity Feed -->
+        <aside class="col-side">
+          <!-- Room QR Code / Info Card -->
+          <section id="roomSummaryCard" class="glass-card side-card" hidden>
+            <div class="side-card-head">
+              <h3 class="side-card-title">Room Overview</h3>
+              <span id="roomStatusTag" class="badge-lime">Active</span>
+            </div>
+            <div class="side-card-body">
+              <div class="room-share-box">
+                <span class="room-share-label">Shareable Link</span>
+                <div class="copy-input-row">
+                  <input id="shareLinkInput" type="text" readonly value="" />
+                  <button id="copyShareLinkBtn" class="btn btn-xs btn-outline" type="button">Copy</button>
+                </div>
+              </div>
+              <div id="qrCodeContainer" class="qr-preview-box"></div>
+            </div>
+          </section>
+
+          <!-- Live WebSocket Event Stream -->
+          <section class="glass-card side-card console-card">
+            <div class="side-card-head">
+              <div class="console-title-group">
+                <span class="live-indicator"></span>
+                <h3 class="side-card-title">Live Telemetry</h3>
+              </div>
+              <div class="console-actions">
+                <button id="clearLogBtn" class="btn btn-xs btn-ghost" type="button" title="Clear console">
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div class="console-body">
+              <div id="log" class="console-stream"></div>
+            </div>
+          </section>
+
+          <!-- Architecture & Specs Callout -->
+          <section class="glass-card side-card info-card">
+            <div class="info-head">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-info">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <h4>Architecture Highlights</h4>
+            </div>
+            <ul class="spec-list">
+              <li><strong>Transport:</strong> RFC 6455 WebSocket (`/room`)</li>
+              <li><strong>Signaling:</strong> In-memory session registry</li>
+              <li><strong>Storage:</strong> Isolated ephemeral disk cache</li>
+              <li><strong>Security:</strong> Path traversal & header safe</li>
+            </ul>
+          </section>
+        </aside>
+      </div>
+
+      <!-- Footer -->
+      <footer class="app-footer">
+        <div class="footer-inner">
+          <div class="footer-copy">
+            Crafted with passion by <strong>Prince Pal</strong> • Real-Time Systems Engineering
+          </div>
+          <div class="footer-links">
+            <a
+              href="https://www.linkedin.com/in/princepal-dev/"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="footer-link"
+            >
+              LinkedIn Profile
+            </a>
+            <span class="footer-dot">•</span>
+            <span class="footer-version">SocketDrop 0.0.1-SNAPSHOT</span>
+          </div>
+        </div>
       </footer>
     </main>
+
+    <!-- QR Code Modal Dialog -->
+    <div id="qrModal" class="modal-backdrop" hidden>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3>Scan to Join Room</h3>
+          <button id="closeQrModalBtn" class="btn-close" type="button" aria-label="Close dialog">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="modalQrCode" class="modal-qr-box"></div>
+          <p class="modal-help">Scan with any mobile camera to immediately join this room.</p>
+          <div class="modal-link-box">
+            <input id="modalRoomUrl" type="text" readonly value="" />
+            <button id="copyModalUrlBtn" class="btn btn-sm btn-lime" type="button">Copy URL</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Toast Notifications -->
+    <div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
     <script src="app.js" defer></script>
   </body>
 </html>
-

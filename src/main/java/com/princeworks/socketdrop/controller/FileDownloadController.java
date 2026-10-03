@@ -8,9 +8,11 @@ import com.princeworks.socketdrop.model.file.StoredFile;
 import com.princeworks.socketdrop.service.files.storage.FileStorageService;
 import com.princeworks.socketdrop.websocket.session.RoomRegistry;
 import com.princeworks.socketdrop.websocket.session.SessionRegistry;
+import java.nio.charset.StandardCharsets;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -40,39 +42,66 @@ public class FileDownloadController {
       throw new InvalidArgumentException("roomId and userId are required", "file download");
     }
 
-    StoredFile fileFromServer = fileStorageService.downloadFile(fileId);
-    FileMeta metadata = fileFromServer.getMetaData();
-
-    if (metadata == null)
-      throw new ResourceNotFoundException("File", "file id", fileId);
-
-    if (metadata.getRoomId() == null || !metadata.getRoomId().equals(roomId)) {
-      throw new ForbiddenOperationException("You are not allowed to download this file");
-    }
-
     boolean joinedRoom = roomRegistry.getSessions(roomId).stream()
         .anyMatch(sessionId -> sessionRegistry.matchesUser(sessionId, userId));
     if (!joinedRoom) {
       throw new ForbiddenOperationException("Join the room before downloading files");
     }
 
+    StoredFile fileFromServer = fileStorageService.downloadFile(fileId);
+    FileMeta metadata = fileFromServer.getMetaData();
+
+    if (metadata == null) {
+      closeResourceStream(fileFromServer.getResource());
+      throw new ResourceNotFoundException("File", "file id", fileId);
+    }
+
+    if (metadata.getRoomId() == null || !metadata.getRoomId().equals(roomId)) {
+      closeResourceStream(fileFromServer.getResource());
+      throw new ForbiddenOperationException("You are not allowed to download this file");
+    }
+
     if (metadata.getFileSize() != null && metadata.getFileSize() > maxDownloadSize) {
-      throw new InvalidArgumentException("Download size exceeds max allowed size of 50 MB", "file download");
+      closeResourceStream(fileFromServer.getResource());
+      long maxMb = maxDownloadSize / (1024 * 1024);
+      throw new InvalidArgumentException(
+          String.format("Download size exceeds max allowed size of %d MB", maxMb), "file download");
     }
 
     Resource resource = fileFromServer.getResource();
+    ContentDisposition contentDisposition = ContentDisposition.attachment()
+        .filename(metadata.getOriginalFileName(), StandardCharsets.UTF_8)
+        .build();
+
     return ResponseEntity.ok()
-        .header(
-            HttpHeaders.CONTENT_DISPOSITION,
-            "attachment; filename=\"" + metadata.getOriginalFileName() + "\"")
+        .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition.toString())
         .contentType(MediaType.APPLICATION_OCTET_STREAM)
-        .contentLength(metadata.getFileSize())
+        .contentLength(metadata.getFileSize() != null ? metadata.getFileSize() : -1)
         .body(resource);
   }
 
   @DeleteMapping("/{fileId}")
-  public ResponseEntity<Void> deleteFile(@PathVariable("fileId") String fileId) {
+  public ResponseEntity<Void> deleteFile(
+      @PathVariable("fileId") String fileId,
+      @RequestParam(value = "roomId", required = false) String roomId,
+      @RequestParam(value = "userId", required = false) String userId) {
+    if (roomId != null && userId != null) {
+      boolean joinedRoom = roomRegistry.getSessions(roomId).stream()
+          .anyMatch(sessionId -> sessionRegistry.matchesUser(sessionId, userId));
+      if (!joinedRoom) {
+        throw new ForbiddenOperationException("Join the room before deleting files");
+      }
+    }
     fileStorageService.deleteFile(fileId);
     return ResponseEntity.noContent().build();
   }
+
+  private void closeResourceStream(Resource resource) {
+    if (resource != null) {
+      try {
+        resource.getInputStream().close();
+      } catch (Exception ignored) {}
+    }
+  }
 }
+

@@ -4,6 +4,7 @@ import com.princeworks.socketdrop.exception.InvalidArgumentException;
 import com.princeworks.socketdrop.response.file.UploadResponse;
 import com.princeworks.socketdrop.service.event.progress.ProgressEventService;
 import com.princeworks.socketdrop.service.files.storage.FileStorageService;
+import com.princeworks.socketdrop.websocket.session.RoomRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,19 +18,26 @@ import org.springframework.web.multipart.MultipartFile;
 public class FileUploadController {
   @Autowired private FileStorageService fileStorageService;
   @Autowired private ProgressEventService progressEventService;
+  @Autowired private RoomRegistry roomRegistry;
 
   @PostMapping
   public ResponseEntity<UploadResponse> handleUploads(
       @RequestParam("file") MultipartFile file,
       @RequestParam("roomId") String roomId) {
-    if (file == null || file.isEmpty())
-          throw new InvalidArgumentException("Error : File is required!", "file upload");
-
-    if (roomId == null || roomId.trim().isEmpty()) {
-      throw new InvalidArgumentException("Error : roomId is required!", "file upload");
+    if (file == null || file.isEmpty()) {
+      throw new InvalidArgumentException("File is required", "file upload");
     }
 
-    progressEventService.notifyUploadStarted(roomId, file.getOriginalFilename(), file.getSize());
+    if (roomId == null || roomId.trim().isEmpty()) {
+      throw new InvalidArgumentException("roomId is required", "file upload");
+    }
+
+    if (!roomRegistry.roomExists(roomId)) {
+      throw new InvalidArgumentException("Room does not exist", "file upload");
+    }
+
+    String fileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown";
+    progressEventService.notifyUploadStarted(roomId, fileName, file.getSize());
 
     try {
       UploadResponse response = fileStorageService.uploadFile(file, roomId);
@@ -37,8 +45,9 @@ public class FileUploadController {
           roomId, response.getFileId(), response.getFileName(), response.getFileSize());
       return ResponseEntity.ok(response);
     } catch (RuntimeException e) {
-      progressEventService.notifyUploadFailed(roomId, file.getOriginalFilename(), e.getMessage());
+      progressEventService.notifyUploadFailed(roomId, fileName, e.getMessage());
       throw e;
     }
   }
 }
+

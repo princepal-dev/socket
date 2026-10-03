@@ -9,22 +9,19 @@ import java.util.concurrent.ConcurrentMap;
 
 @Component
 public class RoomRegistry {
-  ConcurrentMap<String, String> sessionToRoom = new ConcurrentHashMap<>();
-  ConcurrentMap<String, Set<String>> roomToSessionId = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, String> sessionToRoom = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, Set<String>> roomToSessionId = new ConcurrentHashMap<>();
 
   public void joinRoom(String sessionId, String roomId) {
-    // 1. Remove from old room (if exists)
-    String oldRoom = sessionToRoom.get(sessionId);
-    if (oldRoom != null) {
-      Set<String> oldRoomSessions = roomToSessionId.get(oldRoom);
-      if (oldRoomSessions != null) {
-        oldRoomSessions.remove(sessionId);
+    if (sessionId == null || roomId == null) return;
 
-        // cleanup empty room
-        if (oldRoomSessions.isEmpty()) {
-          roomToSessionId.remove(oldRoom);
-        }
-      }
+    // 1. Remove from old room (if exists)
+    String oldRoom = sessionToRoom.remove(sessionId);
+    if (oldRoom != null) {
+      roomToSessionId.computeIfPresent(oldRoom, (r, sessions) -> {
+        sessions.remove(sessionId);
+        return sessions.isEmpty() ? null : sessions;
+      });
     }
 
     // 2. Add to new room
@@ -35,30 +32,30 @@ public class RoomRegistry {
   }
 
   public void leaveRoom(String sessionId) {
+    if (sessionId == null) return;
     String room = sessionToRoom.remove(sessionId);
     if (room == null) return;
 
-    Set<String> sessions = roomToSessionId.get(room);
-    if (sessions != null) {
+    roomToSessionId.computeIfPresent(room, (r, sessions) -> {
       sessions.remove(sessionId);
-
-      // cleanup empty room
-      if (sessions.isEmpty()) {
-        roomToSessionId.remove(room);
-      }
-    }
+      return sessions.isEmpty() ? null : sessions;
+    });
   }
 
   public String getRoom(String sessionId) {
+    if (sessionId == null) return null;
     return sessionToRoom.get(sessionId);
   }
 
   public boolean roomExists(String roomId) {
+    if (roomId == null) return false;
     return roomToSessionId.containsKey(roomId);
   }
 
   public Set<String> getSessions(String roomId) {
+    if (roomId == null) return Collections.emptySet();
     Set<String> sessions = roomToSessionId.get(roomId);
     return sessions == null ? Collections.emptySet() : Collections.unmodifiableSet(sessions);
   }
 }
+

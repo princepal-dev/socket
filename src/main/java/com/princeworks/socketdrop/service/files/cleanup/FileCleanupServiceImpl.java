@@ -22,24 +22,27 @@ public class FileCleanupServiceImpl implements FileCleanupService {
 
   @Override
   public void cleanupFile(String fileId) {
-	if (fileId == null || fileId.trim().isEmpty()) {
-	  throw new InvalidArgumentException("File id is required", "cleanupFile");
-	}
+    if (fileId == null || fileId.trim().isEmpty()) {
+      throw new InvalidArgumentException("File id is required", "cleanupFile");
+    }
 
-	Path filePath = FileUtils.generatePath(basePath, fileId);
-	boolean deletedFromRegistry = fileMetaDataRegistry.removeDataFromRegistry(fileId) != null;
-	boolean fileExists = Files.exists(filePath);
+    Path filePath = FileUtils.generatePath(basePath, fileId);
+    boolean hasMetadata = fileMetaDataRegistry.contains(fileId);
+    boolean fileExists = Files.exists(filePath);
 
-	if (!deletedFromRegistry && !fileExists) {
-	  throw new ResourceNotFoundException("File", "file id", fileId);
-	}
+    if (!hasMetadata && !fileExists) {
+      throw new ResourceNotFoundException("File", "file id", fileId);
+    }
 
-	if (fileExists) {
-	  try {
-		Files.delete(filePath);
-	  } catch (IOException e) {
-		throw new FileStorageException(filePath.toString(), Operation.DELETE, e);
-	  }
-	}
+    if (fileExists) {
+      try {
+        Files.delete(filePath);
+      } catch (IOException e) {
+        throw new FileStorageException("File deletion failed", Operation.DELETE, e);
+      }
+    }
+
+    fileMetaDataRegistry.removeDataFromRegistry(fileId);
   }
 }
+

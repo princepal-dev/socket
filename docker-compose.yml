@@ -8,9 +8,10 @@ services:
       - "8080:8080"
     environment:
       SPRING_FILE_BASE_PATH: /app/storage
-      SPRING_FILE_MAX_SIZE: 524288000
+      SPRING_FILE_MAX_SIZE: 52428800
       SPRING_FILE_MAX_DOWNLOAD_SIZE: 52428800
       SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE: 50MB
+
       SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: 50MB
     volumes:
       - socket_drop_storage:/app/storage
