@@ -33,6 +33,7 @@ const els = {
   displayName: $("displayName"),
   roomId: $("roomId"),
   pasteRoomBtn: $("pasteRoomBtn"),
+  scanCameraBtn: $("scanCameraBtn"),
   createRoomBtn: $("createRoomBtn"),
   joinRoomBtn: $("joinRoomBtn"),
 
@@ -92,6 +93,11 @@ const els = {
   modalUrl: $("modalRoomUrl"),
   copyModalUrlBtn: $("copyModalUrlBtn"),
 
+  cameraScannerModal: $("cameraScannerModal"),
+  closeScannerBtn: $("closeScannerBtn"),
+  scannerVideo: $("scannerVideo"),
+  scannerStatus: $("scannerStatus"),
+
   dragOverlay: $("dragOverlay"),
   toasts: $("toastContainer"),
   themeToggle: $("themeToggle"),
@@ -102,6 +108,9 @@ const state = {
   roomId: "",
   userId: "",
   displayName: "",
+  networkInfo: null,
+  cameraStream: null,
+  scannerInterval: null,
   files: new Map(),
   queue: [],
   uploading: false,
@@ -647,6 +656,22 @@ function handleServerMessage(data) {
       state.destroyed = false;
       setConnectionStatus("online");
       syncUrlToRoom();
+
+      if (Array.isArray(data.files)) {
+        for (const f of data.files) {
+          if (f && f.fileId && !state.files.has(f.fileId)) {
+            state.files.set(f.fileId, {
+              fileId: f.fileId,
+              fileName: String(f.originalFileName || f.fileName || `${f.fileId}.bin`),
+              fileSize: Number(f.fileSize || 0),
+              uploadedAt: new Date(),
+              uploaderId: f.uploaderId || "",
+              mine: Boolean(f.uploaderId && f.uploaderId === state.userId),
+            });
+          }
+        }
+      }
+
       render();
       showToast(
         data.type === "ROOM_CREATED" ? `Room ${state.roomId} is live` : `Joined room ${state.roomId}`,
@@ -678,19 +703,38 @@ function handleServerMessage(data) {
     case "UPLOAD_PROGRESS": {
       if (data.status === "COMPLETED" && data.fileId) {
         const id = String(data.fileId);
+        const isMine = Boolean(data.uploaderId && data.uploaderId === state.userId);
         if (!state.files.has(id)) {
           state.files.set(id, {
             fileId: id,
             fileName: String(data.fileName || `${id}.bin`),
             fileSize: Number(data.fileSize || 0),
             uploadedAt: new Date(),
-            mine: false,
+            uploaderId: data.uploaderId || "",
+            mine: isMine,
           });
           render();
+        } else if (isMine) {
+          const existing = state.files.get(id);
+          existing.mine = true;
+          existing.uploaderId = state.userId;
+          render();
         }
-        if (!state.uploading) showToast(`New file: ${data.fileName || "file"}`, "success");
+        if (!state.uploading && !isMine) showToast(`New file: ${data.fileName || "file"}`, "success");
       } else if (data.status === "FAILED") {
         showToast(`Send failed: ${data.message || "unknown error"}`, "error");
+      }
+      break;
+    }
+
+    case "FILE_DELETED": {
+      if (data.fileId) {
+        const id = String(data.fileId);
+        const known = state.files.get(id);
+        const name = known ? known.fileName : (data.fileName || "File");
+        state.files.delete(id);
+        render();
+        showToast(`File removed: ${name}`, "info");
       }
       break;
     }
@@ -719,18 +763,42 @@ function handleServerMessage(data) {
 
 /* =============================== rendering =============================== */
 
-function shareUrl() {
+function shareUrl(preferLan = true) {
   if (!state.roomId) return "";
-  return `${window.location.origin}/?roomId=${encodeURIComponent(state.roomId)}`;
+  let baseOrigin = window.location.origin;
+  const host = window.location.hostname || "";
+  const isLocal = !host || host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+  if (isLocal && preferLan && state.networkInfo && state.networkInfo.lanUrl) {
+    baseOrigin = state.networkInfo.lanUrl;
+  }
+  return `${baseOrigin}/app?roomId=${encodeURIComponent(state.roomId)}`;
 }
 
 function syncUrlToRoom() {
   try {
     const url = new URL(window.location.href);
-    if (state.roomId) url.searchParams.set("roomId", state.roomId);
-    else url.searchParams.delete("roomId");
-    url.hash = "";
-    window.history.replaceState(null, "", url.toString());
+    if (state.roomId) {
+      url.searchParams.set("roomId", state.roomId);
+      url.hash = "";
+      window.history.replaceState(null, "", url.toString());
+    } else if (!state.pendingAction) {
+      const existing = url.searchParams.get("roomId");
+      if (!existing || existing === state.roomId) {
+        url.searchParams.delete("roomId");
+        url.hash = "";
+        window.history.replaceState(null, "", url.toString());
+      }
+    }
+  } catch (_) {}
+}
+
+async function fetchNetworkInfo() {
+  try {
+    const res = await fetch("/api/network-info");
+    if (res.ok) {
+      state.networkInfo = await res.json();
+      render();
+    }
   } catch (_) {}
 }
 
@@ -801,7 +869,18 @@ function render() {
   if (els.lanHint) {
     const host = window.location.hostname || "";
     const isLocal = !host || host === "localhost" || host === "127.0.0.1" || host === "[::1]";
-    els.lanHint.hidden = !(inRoom && isLocal);
+    if (inRoom && isLocal) {
+      els.lanHint.hidden = false;
+      if (state.networkInfo && state.networkInfo.lanUrl) {
+        els.lanHint.className = "hint-line success";
+        els.lanHint.innerHTML = `Phone-ready QR active: encoded with your Wi-Fi address (<code>${state.networkInfo.lanUrl}</code>) so phones can scan and join.`;
+      } else {
+        els.lanHint.className = "hint-line warn";
+        els.lanHint.textContent = "You are on localhost. Connect this computer to Wi-Fi/LAN so phones can open the QR code, or type the 6-letter code.";
+      }
+    } else {
+      els.lanHint.hidden = true;
+    }
   }
 
   if (els.createRoomBtn) els.createRoomBtn.disabled = busy || inRoom;
@@ -1061,8 +1140,12 @@ function startUpload(item) {
 
   const form = new FormData();
   form.append("file", item.file, item.name);
+  form.append("roomId", state.roomId);
+  if (state.userId) form.append("userId", state.userId);
 
-  xhr.open("POST", `/file/uploads?roomId=${encodeURIComponent(state.roomId)}`, true);
+  const query = new URLSearchParams({ roomId: state.roomId });
+  if (state.userId) query.set("userId", state.userId);
+  xhr.open("POST", `/file/uploads?${query.toString()}`, true);
 
   xhr.upload.onprogress = (event) => {
     if (!event.lengthComputable) return;
@@ -1410,7 +1493,9 @@ function closeQr() {
 }
 
 function saveQrImage() {
-  const svg = els.modalQr && els.modalQr.querySelector("svg");
+  const svg =
+    (els.modalQr && els.modalQr.querySelector("svg")) ||
+    (els.qrContainer && els.qrContainer.querySelector("svg"));
   if (!svg || !state.roomId) {
     showToast("QR not ready yet", "error");
     return;
@@ -1424,6 +1509,7 @@ function saveQrImage() {
       canvas.width = 900;
       canvas.height = 900;
       const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = false;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -1444,6 +1530,98 @@ function saveQrImage() {
     img.src = svgUrl;
   } catch (_) {
     showToast("Could not save the QR image", "error");
+  }
+}
+
+/* ------------------------- camera qr scanner ------------------------- */
+
+async function openCameraScanner() {
+  if (isInRoom()) {
+    showToast("You are already in a room", "info");
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showToast("Camera access is not supported by your browser", "error");
+    return;
+  }
+  if (!els.cameraScannerModal || !els.scannerVideo) return;
+  els.cameraScannerModal.hidden = false;
+  if (els.scannerStatus) els.scannerStatus.textContent = "Starting camera…";
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" } },
+      audio: false,
+    });
+    state.cameraStream = stream;
+    els.scannerVideo.srcObject = stream;
+    await els.scannerVideo.play();
+    if (els.scannerStatus) els.scannerStatus.textContent = "Point camera at a SocketDrop QR code";
+    startQrDetection();
+  } catch (err) {
+    closeCameraScanner();
+    showToast("Camera permission denied or camera not available", "error");
+  }
+}
+
+function closeCameraScanner() {
+  stopQrDetection();
+  if (state.cameraStream) {
+    state.cameraStream.getTracks().forEach((t) => t.stop());
+    state.cameraStream = null;
+  }
+  if (els.scannerVideo) {
+    els.scannerVideo.srcObject = null;
+  }
+  if (els.cameraScannerModal) {
+    els.cameraScannerModal.hidden = true;
+  }
+}
+
+function startQrDetection() {
+  stopQrDetection();
+  let detector = null;
+  if (typeof window.BarcodeDetector === "function") {
+    try {
+      detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+    } catch (_) {}
+  }
+
+  state.scannerInterval = setInterval(async () => {
+    if (!els.scannerVideo || els.scannerVideo.readyState < 2) return;
+    if (detector) {
+      try {
+        const barcodes = await detector.detect(els.scannerVideo);
+        if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+          handleScannedQrResult(barcodes[0].rawValue);
+        }
+      } catch (_) {}
+    }
+  }, 250);
+}
+
+function stopQrDetection() {
+  if (state.scannerInterval) {
+    clearInterval(state.scannerInterval);
+    state.scannerInterval = null;
+  }
+}
+
+function handleScannedQrResult(text) {
+  if (!text) return;
+  closeCameraScanner();
+  let candidate = text.trim();
+  try {
+    const parsed = new URL(candidate);
+    candidate = parsed.searchParams.get("roomId") || parsed.searchParams.get("room") || candidate;
+  } catch (_) {}
+  const code = normalizeRoomCode(candidate);
+  if (code && code.length === 6) {
+    if (els.roomId) els.roomId.value = code;
+    showToast(`Scanned room ${code} — connecting…`, "success");
+    onJoinRoom();
+  } else {
+    showToast(`QR scanned but found no valid 6-letter room code`, "error");
   }
 }
 
@@ -1584,6 +1762,20 @@ function wire() {
     });
   }
   if (els.downloadQrBtn) els.downloadQrBtn.addEventListener("click", saveQrImage);
+  if (els.qrContainer) {
+    els.qrContainer.style.cursor = "pointer";
+    els.qrContainer.title = "Click to enlarge QR code";
+    els.qrContainer.addEventListener("click", openQr);
+  }
+
+  // Camera scanner
+  if (els.scanCameraBtn) els.scanCameraBtn.addEventListener("click", openCameraScanner);
+  if (els.closeScannerBtn) els.closeScannerBtn.addEventListener("click", closeCameraScanner);
+  if (els.cameraScannerModal) {
+    els.cameraScannerModal.addEventListener("click", (event) => {
+      if (event.target === els.cameraScannerModal) closeCameraScanner();
+    });
+  }
 
   // Confirm dialog
   if (els.confirmCancelBtn) els.confirmCancelBtn.addEventListener("click", () => closeConfirm(false));
@@ -1704,6 +1896,10 @@ function wire() {
         els.presenceModal.hidden = true;
         return;
       }
+      if (els.cameraScannerModal && !els.cameraScannerModal.hidden) {
+        closeCameraScanner();
+        return;
+      }
       if (els.qrModal && !els.qrModal.hidden) closeQr();
     }
   });
@@ -1724,6 +1920,43 @@ function wire() {
       event.returnValue = "";
     }
   });
+
+  // On iOS the whole page can unload on an app switch; warn only while bytes are moving.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && state.uploading) {
+      try { sessionStorage.setItem("socketdrop-uploading", "1"); } catch (_) {}
+    } else if (document.visibilityState === "visible") {
+      try { sessionStorage.removeItem("socketdrop-uploading"); } catch (_) {}
+    }
+  });
+}
+
+/**
+ * Mobile viewport helpers.
+ *
+ * iPadOS reports a desktop `pointer: hover` even on a bare touchscreen, so capability is
+ * detected by touch support plus the absence of a fine pointer rather than by hover alone.
+ */
+function initViewportHelpers() {
+  try {
+    const coarse = window.matchMedia("(pointer: coarse)");
+    if (coarse.matches) document.body.classList.add("is-touch");
+
+    // On-screen keyboards cover the sticky room bar on phones; drop it while typing.
+    const viewport = window.visualViewport;
+    if (viewport) {
+      let keyboardOpen = false;
+      const sync = () => {
+        const covered = window.innerHeight - viewport.height - viewport.offsetTop > 120;
+        if (covered === keyboardOpen) return;
+        keyboardOpen = covered;
+        document.body.classList.toggle("kb-open", covered);
+      };
+      viewport.addEventListener("resize", sync);
+      viewport.addEventListener("scroll", sync);
+      sync();
+    }
+  } catch (_) {}
 }
 
 function initFromUrl() {
@@ -1732,35 +1965,16 @@ function initFromUrl() {
     const fromQuery = params.get("roomId") || params.get("room");
     const fromHash = window.location.hash ? window.location.hash.replace(/^#/, "") : "";
     const initial = normalizeRoomCode(fromQuery || fromHash);
-    if (initial && els.roomId) {
-      els.roomId.value = initial;
-      showToast(`Code ${initial} filled in — press Join room`, "info", 4200);
+    if (initial) {
+      if (els.roomId) els.roomId.value = initial;
+      if (!isInRoom() && !state.pendingAction) {
+        showToast(`Joining room ${initial}…`, "info", 3000);
+        onJoinRoom();
+      }
     }
   } catch (_) {}
 }
 
-function initReveal() {
-  const targets = document.querySelectorAll(".reveal");
-  if (!targets.length) return;
-  const reduced =
-    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reduced || !("IntersectionObserver" in window)) {
-    targets.forEach((el) => el.classList.add("in"));
-    return;
-  }
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("in");
-          observer.unobserve(entry.target);
-        }
-      });
-    },
-    { threshold: 0.12 }
-  );
-  targets.forEach((el) => observer.observe(el));
-}
 
 /* ================================ boot ================================ */
 
@@ -1769,8 +1983,9 @@ state.displayName = getPeerName();
 if (els.displayName) els.displayName.value = state.displayName;
 setConnectionStatus("offline");
 wire();
+fetchNetworkInfo();
 initFromUrl();
 render();
-initReveal();
+initViewportHelpers();
 
 })();

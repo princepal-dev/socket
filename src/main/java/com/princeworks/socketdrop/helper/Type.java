@@ -10,5 +10,6 @@ public enum Type {
     ROOM_DESTROYED,
     ROOM_PRESENCE,
     UPLOAD_PROGRESS,
+    FILE_DELETED,
     ERROR
 }

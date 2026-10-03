@@ -243,6 +243,95 @@ class RoomWebSocketHandlerTest {
     verify(messagingService, never()).closeSession(any(WebSocketSession.class), anyInt(), anyString());
   }
 
+  @Test
+  void disconnectCleansUpAbandonedRoomFiles() {
+    RoomRegistry roomRegistry = new RoomRegistry();
+    FileCleanupService cleanupService = Mockito.mock(FileCleanupService.class);
+    RoomWebSocketHandler handler = new RoomWebSocketHandler();
+    ReflectionTestUtils.setField(handler, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(handler, "objectMapper", new ObjectMapper());
+    ReflectionTestUtils.setField(handler, "sessionRegistry", new SessionRegistry());
+    ReflectionTestUtils.setField(handler, "webSocketMessagingService", Mockito.mock(WebSocketMessagingService.class));
+    ReflectionTestUtils.setField(handler, "fileCleanupService", cleanupService);
+    ReflectionTestUtils.setField(handler, "roomPresenceService", Mockito.mock(RoomPresenceService.class));
+
+    WebSocketSession alice = mockOpenSession("s1");
+    handler.afterConnectionEstablished(alice);
+    handler.handleTextMessage(alice, new TextMessage("{\"type\":\"CREATE_ROOM\",\"displayName\":\"alice\"}"));
+    String roomId = roomRegistry.getRoom("s1");
+
+    handler.afterConnectionClosed(alice, org.springframework.web.socket.CloseStatus.NORMAL);
+
+    verify(cleanupService, times(1)).cleanupRoom(roomId);
+    assertFalse(roomRegistry.roomExists(roomId));
+  }
+
+  @Test
+  void leaveRoomCleansUpAbandonedRoomFilesWhenLastParticipant() {
+    RoomRegistry roomRegistry = new RoomRegistry();
+    FileCleanupService cleanupService = Mockito.mock(FileCleanupService.class);
+    RoomWebSocketHandler handler = new RoomWebSocketHandler();
+    ReflectionTestUtils.setField(handler, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(handler, "objectMapper", new ObjectMapper());
+    ReflectionTestUtils.setField(handler, "sessionRegistry", new SessionRegistry());
+    ReflectionTestUtils.setField(handler, "webSocketMessagingService", Mockito.mock(WebSocketMessagingService.class));
+    ReflectionTestUtils.setField(handler, "fileCleanupService", cleanupService);
+    ReflectionTestUtils.setField(handler, "roomPresenceService", Mockito.mock(RoomPresenceService.class));
+
+    WebSocketSession alice = mockOpenSession("s1");
+    handler.afterConnectionEstablished(alice);
+    handler.handleTextMessage(alice, new TextMessage("{\"type\":\"CREATE_ROOM\",\"displayName\":\"alice\"}"));
+    String roomId = roomRegistry.getRoom("s1");
+
+    handler.handleTextMessage(alice, new TextMessage("{\"type\":\"LEAVE_ROOM\"}"));
+
+    verify(cleanupService, times(1)).cleanupRoom(roomId);
+    assertFalse(roomRegistry.roomExists(roomId));
+  }
+
+  @Test
+  void joinRoomSendsExistingFilesToJoiningPeer() {
+    RoomRegistry roomRegistry = new RoomRegistry();
+    WebSocketMessagingService messagingService = Mockito.mock(WebSocketMessagingService.class);
+    com.princeworks.socketdrop.service.files.metadata.FileMetaDataRegistry metaRegistry =
+        Mockito.mock(com.princeworks.socketdrop.service.files.metadata.FileMetaDataRegistry.class);
+
+    RoomWebSocketHandler handler = new RoomWebSocketHandler();
+    ReflectionTestUtils.setField(handler, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(handler, "objectMapper", new ObjectMapper());
+    ReflectionTestUtils.setField(handler, "sessionRegistry", new SessionRegistry());
+    ReflectionTestUtils.setField(handler, "webSocketMessagingService", messagingService);
+    ReflectionTestUtils.setField(handler, "roomPresenceService", Mockito.mock(RoomPresenceService.class));
+    ReflectionTestUtils.setField(handler, "fileMetaDataRegistry", metaRegistry);
+
+    WebSocketSession alice = mockOpenSession("s1");
+    WebSocketSession bob = mockOpenSession("s2");
+
+    handler.afterConnectionEstablished(alice);
+    handler.handleTextMessage(alice, new TextMessage("{\"type\":\"CREATE_ROOM\",\"displayName\":\"alice\"}"));
+    String roomId = roomRegistry.getRoom("s1");
+
+    when(metaRegistry.findByRoomId(roomId)).thenReturn(java.util.List.of(
+        new com.princeworks.socketdrop.model.file.FileMeta("f1", 100L, "doc.pdf", roomId, "u1")
+    ));
+
+    handler.afterConnectionEstablished(bob);
+    handler.handleTextMessage(bob, new TextMessage("{\"type\":\"JOIN_ROOM\",\"roomId\":\"" + roomId + "\",\"displayName\":\"bob\"}"));
+
+    org.mockito.ArgumentCaptor<Object> captor = org.mockito.ArgumentCaptor.forClass(Object.class);
+    verify(messagingService, Mockito.atLeastOnce()).sendToSession(eq(bob), captor.capture());
+
+    var joinedResponse = captor.getAllValues().stream()
+        .filter(obj -> obj instanceof com.princeworks.socketdrop.response.room.RoomJoinedResponse)
+        .map(obj -> (com.princeworks.socketdrop.response.room.RoomJoinedResponse) obj)
+        .findFirst()
+        .orElse(null);
+
+    assertNotNull(joinedResponse);
+    assertEquals(1, joinedResponse.getFiles().size());
+    assertEquals("doc.pdf", joinedResponse.getFiles().get(0).getOriginalFileName());
+  }
+
   private WebSocketSession mockOpenSession(String id) {
     WebSocketSession session = Mockito.mock(WebSocketSession.class);
     when(session.getId()).thenReturn(id);

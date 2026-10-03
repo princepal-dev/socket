@@ -52,4 +52,13 @@ class IdGeneratorTest {
     assertTrue(IdGenerator.generateUsername().startsWith("username_"));
     assertEquals(36, IdGenerator.generateRandomId().length());
   }
+
+  @Test
+  void normalizeRoomIdNormalizesShortCodesAndPreservesLegacy() {
+    assertNull(IdGenerator.normalizeRoomId(null));
+    assertEquals("ABCDEF", IdGenerator.normalizeRoomId("abcdef"));
+    assertEquals("ABCDEF", IdGenerator.normalizeRoomId("  abcdef  "));
+    assertEquals("123456", IdGenerator.normalizeRoomId("123456"));
+    assertEquals("room_legacy_12345", IdGenerator.normalizeRoomId("room_legacy_12345"));
+  }
 }

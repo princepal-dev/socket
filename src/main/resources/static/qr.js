@@ -56,8 +56,14 @@ const QRCode = (function () {
     multiply: function (e) {
       const num = new Array(this.getLength() + e.getLength() - 1).fill(0);
       for (let i = 0; i < this.getLength(); i++) {
+        const a = this.get(i);
+        // glog(0) is undefined, and zero coefficients do occur. Skip them.
+        if (a === 0) continue;
+        const aLog = QRMath.glog(a);
         for (let j = 0; j < e.getLength(); j++) {
-          num[i + j] ^= QRMath.gexp(QRMath.glog(this.get(i)) + QRMath.glog(e.get(j)));
+          const b = e.get(j);
+          if (b === 0) continue;
+          num[i + j] ^= QRMath.gexp(aLog + QRMath.glog(b));
         }
       }
       return new QRPolynomial(num, 0);
@@ -67,7 +73,11 @@ const QRCode = (function () {
       const ratio = QRMath.glog(this.get(0)) - QRMath.glog(e.get(0));
       const num = new Array(this.getLength());
       for (let i = 0; i < this.getLength(); i++) num[i] = this.get(i);
-      for (let i = 0; i < e.getLength(); i++) num[i] ^= QRMath.gexp(QRMath.glog(e.get(i)) + ratio);
+      for (let i = 0; i < e.getLength(); i++) {
+        const ei = e.get(i);
+        if (ei === 0) continue; // glog(0) is undefined
+        num[i] ^= QRMath.gexp(QRMath.glog(ei) + ratio);
+      }
       return new QRPolynomial(num, 0).mod(e);
     },
   };
@@ -128,13 +138,117 @@ const QRCode = (function () {
     [4, 49, 31],
   ];
 
+  // BCH(18, 6) version codes for symbols version 7 to 10 (ISO/IEC 18004:2006 Section 8.10)
+  const QR_VERSION_INFO = {
+    7: 0x07c94,
+    8: 0x085bc,
+    9: 0x09a99,
+    10: 0x0a4d3,
+  };
+
+  // Error-correction levels use the qrcode.js convention. The RS block table below only
+  // carries L and M entries, so this encoder emits L. Previously the level was passed as 0,
+  // which the table lookup read as "L" while the format information advertised "M" — a decoder
+  // then applied M-level correction to L-level data and read pure garbage.
+  const ERROR_CORRECT_LEVEL = { L: 1, M: 0, Q: 3, H: 2 };
+  const EC_L = ERROR_CORRECT_LEVEL.L;
+  const EC_L_TABLE_OFFSET = 0;
+  const EC_M_TABLE_OFFSET = 1;
+
   function getRsBlocks(typeNumber, errorCorrectionLevel) {
-    const rsBlock = RS_BLOCK_TABLE[(typeNumber - 1) * 2 + (errorCorrectionLevel === 0 ? 0 : 1)];
+    const offset =
+      errorCorrectionLevel === EC_L ? EC_L_TABLE_OFFSET : EC_M_TABLE_OFFSET;
+    const rsBlock = RS_BLOCK_TABLE[(typeNumber - 1) * 2 + offset];
     const list = [];
     for (let i = 0; i < rsBlock[0]; i++) {
       list.push({ totalCount: rsBlock[1], dataCount: rsBlock[2] });
     }
     return list;
+  }
+
+  /**
+   * Standard mask penalty scoring (ISO/IEC 18004 section 8.8.2); lower is better.
+   *   Rule 1 - penalty for each run of 5+ same-colour modules.
+   *   Rule 2 - penalty for each 2x2 block of one colour.
+   *   Rule 3 - penalty for each 1:1:3:1:1 finder-like pattern with 4 light modules beside it.
+   *   Rule 4 - penalty for dark/light imbalance away from 50%.
+   */
+  const FINDER_LIKE = [true, false, true, true, true, false, true, false, false, false, false];
+
+  function getLostPoint(qrCode) {
+    const size = qrCode.getModuleCount();
+    const m = qrCode.modules;
+    let lost = 0;
+
+    // Rule 1 + Rule 3 across rows, then down columns.
+    for (let pass = 0; pass < 2; pass++) {
+      for (let a = 0; a < size; a++) {
+        const at = pass === 0 ? (i) => m[a][i] : (i) => m[i][a];
+        let run = 1;
+        for (let i = 1; i < size; i++) {
+          if (at(i) === at(i - 1)) {
+            run += 1;
+          } else {
+            if (run >= 5) lost += 3 + (run - 5);
+            run = 1;
+          }
+        }
+        if (run >= 5) lost += 3 + (run - 5);
+
+        for (let i = 0; i + FINDER_LIKE.length <= size; i++) {
+          let hit = true;
+          for (let k = 0; k < FINDER_LIKE.length; k++) {
+            if (at(i + k) !== FINDER_LIKE[k]) { hit = false; break; }
+          }
+          if (hit) lost += 40;
+        }
+      }
+    }
+
+    // Rule 2.
+    for (let r = 0; r < size - 1; r++) {
+      for (let c = 0; c < size - 1; c++) {
+        const v = m[r][c];
+        if (v === m[r][c + 1] && v === m[r + 1][c] && v === m[r + 1][c + 1]) lost += 3;
+      }
+    }
+
+    // Rule 4.
+    let dark = 0;
+    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) if (m[r][c]) dark += 1;
+    const percent = (dark * 100) / (size * size);
+    lost += Math.floor(Math.abs(percent - 50) / 5) * 10;
+
+    return lost;
+  }
+
+  function getBestMaskPattern(qrCode) {
+    let minLostPoint = Infinity;
+    let pattern = 0;
+    for (let i = 0; i < 8; i += 1) {
+      qrCode.makeImpl(true, i);
+      const lostPoint = getLostPoint(qrCode);
+      if (lostPoint < minLostPoint) {
+        minLostPoint = lostPoint;
+        pattern = i;
+      }
+    }
+    return pattern;
+  }
+
+  /** The eight data-mask formulas from ISO/IEC 18004 table 10. */
+  function maskFn(pattern, row, col) {
+    switch (pattern) {
+      case 0: return (row + col) % 2 === 0;
+      case 1: return row % 2 === 0;
+      case 2: return col % 3 === 0;
+      case 3: return (row + col) % 3 === 0;
+      case 4: return (Math.floor(row / 2) + Math.floor(col / 3)) % 2 === 0;
+      case 5: return ((row * col) % 2) + ((row * col) % 3) === 0;
+      case 6: return (((row * col) % 2) + ((row * col) % 3)) % 2 === 0;
+      case 7: return (((row + col) % 2) + ((row * col) % 3)) % 2 === 0;
+      default: return false;
+    }
   }
 
   function QRCodeModel(typeNumber, errorCorrectionLevel) {
@@ -157,7 +271,7 @@ const QRCode = (function () {
       return this.moduleCount;
     },
     make: function () {
-      this.makeImpl(false, 0);
+      this.makeImpl(false, getBestMaskPattern(this));
     },
     makeImpl: function (test, maskPattern) {
       this.moduleCount = this.typeNumber * 4 + 17;
@@ -171,6 +285,7 @@ const QRCode = (function () {
       this.setupPositionAdjustPattern();
       this.setupTimingPattern();
       this.setupTypeInfo(test, maskPattern);
+      this.setupVersionInfo();
       if (this.dataCache == null) {
         this.dataCache = QRCodeModel.createData(
           this.typeNumber,
@@ -245,6 +360,16 @@ const QRCode = (function () {
       }
       this.modules[this.moduleCount - 8][8] = true;
     },
+    setupVersionInfo: function () {
+      if (this.typeNumber < 7) return;
+      const bits = QR_VERSION_INFO[this.typeNumber];
+      if (!bits) return;
+      for (let i = 0; i < 18; i++) {
+        const mod = ((bits >>> i) & 1) === 1;
+        this.modules[Math.floor(i / 3)][this.moduleCount - 11 + (i % 3)] = mod;
+        this.modules[this.moduleCount - 11 + (i % 3)][Math.floor(i / 3)] = mod;
+      }
+    },
     mapData: function (data, maskPattern) {
       let inc = -1,
         row = this.moduleCount - 1,
@@ -259,8 +384,10 @@ const QRCode = (function () {
               if (byteIndex < data.length) {
                 dark = ((data[byteIndex] >>> bitIndex) & 1) === 1;
               }
-              const mask = (row + col - c) % 2 === 0;
-              if (mask) dark = !dark;
+              // Honour the selected mask. This previously hardcoded mask 0 while
+              // the format information advertised whichever mask was chosen, so a
+              // decoder un-masked the wrong cells and read noise.
+              if (maskFn(maskPattern, row, col - c)) dark = !dark;
               this.modules[row][col - c] = dark;
               bitIndex--;
               if (bitIndex == -1) {
@@ -356,16 +483,17 @@ const QRCode = (function () {
   return {
     generateSvg: function (text, size = 180) {
       if (!text) return "";
-      // Byte-mode capacity (Level L): pick smallest type that fits.
-      // Short room links (~30 chars) land in type 2-3, very scannable.
+      // Byte-mode capacity at error-correction level L. Pick the smallest symbol that
+      // fits: fewer modules means larger, easier-to-scan squares at a given pixel size.
       const len = text.length;
-      let type = 2;
-      if (len > 26) type = 3;
-      if (len > 44) type = 4;
-      if (len > 70) type = 5;
-      if (len > 100) type = 6;
+      let type = 1;
+      if (len > 17) type = 2;
+      if (len > 32) type = 3;
+      if (len > 53) type = 4;
+      if (len > 78) type = 5;
+      if (len > 106) type = 6;
       if (len > 134) type = 7;
-      const qr = new QRCodeModel(type, 0); // Level L
+      const qr = new QRCodeModel(type, EC_L);
       qr.addData(text);
       qr.make();
       const count = qr.getModuleCount();

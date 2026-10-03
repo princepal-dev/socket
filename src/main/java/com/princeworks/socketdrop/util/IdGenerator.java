@@ -31,4 +31,15 @@ public final class IdGenerator {
   public static String generateUsername() {
     return "username_" + generateRandomId();
   }
+
+  public static String normalizeRoomId(String rawRoomId) {
+    if (rawRoomId == null) {
+      return null;
+    }
+    String trimmed = rawRoomId.trim();
+    if (trimmed.length() <= 8 && trimmed.matches("(?i)^[a-z0-9]{4,8}$")) {
+      return trimmed.toUpperCase();
+    }
+    return trimmed;
+  }
 }

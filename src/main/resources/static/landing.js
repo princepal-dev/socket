@@ -33,4 +33,12 @@ if (toggle) {
 }
 
 applyTheme(preferredTheme());
+
+try {
+  const params = new URLSearchParams(window.location.search);
+  const roomId = params.get("roomId") || params.get("room");
+  if (roomId) {
+    window.location.replace(`/app?roomId=${encodeURIComponent(roomId.trim())}`);
+  }
+} catch (_) {}
 })();

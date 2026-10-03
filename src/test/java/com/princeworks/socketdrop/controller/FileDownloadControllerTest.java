@@ -166,5 +166,101 @@ class FileDownloadControllerTest {
 
     assertEquals(200, response.getStatusCode().value());
   }
+
+  @Test
+  void deleteFileRequiresRoomAndUser() {
+    FileDownloadController controller = new FileDownloadController();
+    assertThrows(InvalidArgumentException.class, () -> controller.deleteFile("f1", null, "u1"));
+    assertThrows(InvalidArgumentException.class, () -> controller.deleteFile("f1", "r1", null));
+    assertThrows(InvalidArgumentException.class, () -> controller.deleteFile("f1", "   ", "u1"));
+    assertThrows(InvalidArgumentException.class, () -> controller.deleteFile("f1", "r1", "   "));
+  }
+
+  @Test
+  void deleteFileBlocksNonMember() {
+    RoomRegistry roomRegistry = new RoomRegistry();
+    SessionRegistry sessionRegistry = new SessionRegistry();
+    FileDownloadController controller = new FileDownloadController();
+    ReflectionTestUtils.setField(controller, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(controller, "sessionRegistry", sessionRegistry);
+
+    assertThrows(ForbiddenOperationException.class, () -> controller.deleteFile("f1", "room_1", "user_1"));
+  }
+
+  @Test
+  void deleteFileBlocksCrossRoomDeletion() {
+    RoomRegistry roomRegistry = new RoomRegistry();
+    SessionRegistry sessionRegistry = new SessionRegistry();
+    com.princeworks.socketdrop.service.files.metadata.FileMetaDataRegistry metaRegistry =
+        mock(com.princeworks.socketdrop.service.files.metadata.FileMetaDataRegistry.class);
+
+    roomRegistry.joinRoom("s1", "room_1");
+    sessionRegistry.register("s1", new UserSessionInfo("user_1", "alice"));
+
+    when(metaRegistry.getDataFromRegistry("f1"))
+        .thenReturn(new FileMeta("f1", 10L, "other.txt", "room_2"));
+
+    FileDownloadController controller = new FileDownloadController();
+    ReflectionTestUtils.setField(controller, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(controller, "sessionRegistry", sessionRegistry);
+    ReflectionTestUtils.setField(controller, "fileMetaDataRegistry", metaRegistry);
+
+    assertThrows(ForbiddenOperationException.class, () -> controller.deleteFile("f1", "room_1", "user_1"));
+  }
+
+  @Test
+  void deleteFileSucceedsAndNotifiesPeers() {
+    RoomRegistry roomRegistry = new RoomRegistry();
+    SessionRegistry sessionRegistry = new SessionRegistry();
+    com.princeworks.socketdrop.service.files.metadata.FileMetaDataRegistry metaRegistry =
+        mock(com.princeworks.socketdrop.service.files.metadata.FileMetaDataRegistry.class);
+    FileStorageService fileStorageService = mock(FileStorageService.class);
+    com.princeworks.socketdrop.service.event.progress.ProgressEventService progressEventService =
+        mock(com.princeworks.socketdrop.service.event.progress.ProgressEventService.class);
+
+    roomRegistry.joinRoom("s1", "room_1");
+    sessionRegistry.register("s1", new UserSessionInfo("user_1", "alice"));
+
+    when(metaRegistry.getDataFromRegistry("f1"))
+        .thenReturn(new FileMeta("f1", 10L, "photo.jpg", "room_1"));
+
+    FileDownloadController controller = new FileDownloadController();
+    ReflectionTestUtils.setField(controller, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(controller, "sessionRegistry", sessionRegistry);
+    ReflectionTestUtils.setField(controller, "fileMetaDataRegistry", metaRegistry);
+    ReflectionTestUtils.setField(controller, "fileStorageService", fileStorageService);
+    ReflectionTestUtils.setField(controller, "progressEventService", progressEventService);
+
+    ResponseEntity<Void> res = controller.deleteFile("f1", "room_1", "user_1");
+
+    assertEquals(204, res.getStatusCode().value());
+    org.mockito.Mockito.verify(fileStorageService).deleteFile("f1");
+    org.mockito.Mockito.verify(progressEventService).notifyFileDeleted("room_1", "f1", "photo.jpg");
+  }
+
+  @Test
+  void getRoomFilesRequiresMembershipAndReturnsFiles() {
+    RoomRegistry roomRegistry = new RoomRegistry();
+    SessionRegistry sessionRegistry = new SessionRegistry();
+    com.princeworks.socketdrop.service.files.metadata.FileMetaDataRegistry metaRegistry =
+        mock(com.princeworks.socketdrop.service.files.metadata.FileMetaDataRegistry.class);
+
+    roomRegistry.joinRoom("s1", "room_1");
+    sessionRegistry.register("s1", new UserSessionInfo("user_1", "alice"));
+
+    FileDownloadController controller = new FileDownloadController();
+    ReflectionTestUtils.setField(controller, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(controller, "sessionRegistry", sessionRegistry);
+    ReflectionTestUtils.setField(controller, "fileMetaDataRegistry", metaRegistry);
+
+    assertThrows(ForbiddenOperationException.class, () -> controller.getRoomFiles("room_1", "intruder"));
+
+    when(metaRegistry.findByRoomId("room_1"))
+        .thenReturn(java.util.List.of(new FileMeta("f1", 5L, "a.txt", "room_1")));
+
+    ResponseEntity<java.util.List<FileMeta>> response = controller.getRoomFiles("room_1", "user_1");
+    assertEquals(200, response.getStatusCode().value());
+    assertEquals(1, response.getBody().size());
+  }
 }
 

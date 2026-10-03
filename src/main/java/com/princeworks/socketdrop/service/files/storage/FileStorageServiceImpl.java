@@ -34,6 +34,11 @@ public class FileStorageServiceImpl implements FileStorageService {
 
   @Override
   public UploadResponse uploadFile(MultipartFile file, String roomId) {
+    return uploadFile(file, roomId, null);
+  }
+
+  @Override
+  public UploadResponse uploadFile(MultipartFile file, String roomId, String userId) {
     if (file == null || file.isEmpty()) {
       throw new InvalidArgumentException("File is required", "uploadFile");
     }
@@ -47,7 +52,9 @@ public class FileStorageServiceImpl implements FileStorageService {
     if (originalFileName == null || originalFileName.trim().isEmpty()) {
       originalFileName = fileId;
     } else {
-      originalFileName = Paths.get(originalFileName).getFileName().toString();
+      String clean = originalFileName.replace('\\', '/');
+      clean = Paths.get(clean).getFileName().toString();
+      originalFileName = clean.isEmpty() ? fileId : clean;
     }
 
     Path filePath = FileUtils.generatePath(basePath, fileId);
@@ -67,7 +74,7 @@ public class FileStorageServiceImpl implements FileStorageService {
     }
 
     fileMetaDataRegistry.addRegistry(
-        fileId, new FileMeta(fileId, file.getSize(), originalFileName, roomId));
+        fileId, new FileMeta(fileId, file.getSize(), originalFileName, roomId, userId));
 
     UploadResponse response = new UploadResponse();
     response.setFileId(fileId);

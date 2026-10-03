@@ -15,7 +15,7 @@ RUN mkdir -p /app/storage && chown -R spring:spring /app
 
 ENV SPRING_FILE_BASE_PATH=/app/storage \
     SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE=50MB \
-    SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE=50MB
+    SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE=60MB
 
 COPY --from=build /workspace/target/*.jar /app/app.jar
 

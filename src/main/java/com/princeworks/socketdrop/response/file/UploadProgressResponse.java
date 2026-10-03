@@ -10,6 +10,7 @@ public class UploadProgressResponse {
   private final String fileName;
   private final Long fileSize;
   private final String message;
+  private final String uploaderId;
 
   public UploadProgressResponse(
       String roomId,
@@ -18,12 +19,24 @@ public class UploadProgressResponse {
       String fileName,
       Long fileSize,
       String message) {
+    this(roomId, status, fileId, fileName, fileSize, message, null);
+  }
+
+  public UploadProgressResponse(
+      String roomId,
+      String status,
+      String fileId,
+      String fileName,
+      Long fileSize,
+      String message,
+      String uploaderId) {
     this.roomId = roomId;
     this.status = status;
     this.fileId = fileId;
     this.fileName = fileName;
     this.fileSize = fileSize;
     this.message = message;
+    this.uploaderId = uploaderId;
   }
 
   public Type getType() {
@@ -52,6 +65,10 @@ public class UploadProgressResponse {
 
   public String getMessage() {
     return message;
+  }
+
+  public String getUploaderId() {
+    return uploaderId;
   }
 }
 

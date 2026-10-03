@@ -23,10 +23,16 @@ public class ProgressEventServiceImpl implements ProgressEventService {
 
 	@Override
 	public void notifyUploadCompleted(String roomId, String fileId, String fileName, long fileSize) {
+		notifyUploadCompleted(roomId, fileId, fileName, fileSize, null);
+	}
+
+	@Override
+	public void notifyUploadCompleted(
+			String roomId, String fileId, String fileName, long fileSize, String uploaderId) {
 		sendToRoom(
 			roomId,
 			new UploadProgressResponse(
-				roomId, "COMPLETED", fileId, fileName, fileSize, "Upload completed"));
+				roomId, "COMPLETED", fileId, fileName, fileSize, "Upload completed", uploaderId));
 	}
 
 	@Override
@@ -34,6 +40,11 @@ public class ProgressEventServiceImpl implements ProgressEventService {
 		sendToRoom(
 			roomId,
 			new UploadProgressResponse(roomId, "FAILED", null, fileName, null, reason));
+	}
+
+	@Override
+	public void notifyFileDeleted(String roomId, String fileId, String fileName) {
+		sendToRoom(roomId, new com.princeworks.socketdrop.response.file.FileDeletedResponse(roomId, fileId, fileName));
 	}
 
 	@Override
@@ -46,7 +57,7 @@ public class ProgressEventServiceImpl implements ProgressEventService {
 		broadcast(roomId, new RoomDestroyedResponse(roomId, deletedFiles, message));
 	}
 
-	private void sendToRoom(String roomId, UploadProgressResponse payload) {
+	private void sendToRoom(String roomId, Object payload) {
 		if (roomId == null || roomId.trim().isEmpty() || !roomRegistry.roomExists(roomId)) {
 			return;
 		}

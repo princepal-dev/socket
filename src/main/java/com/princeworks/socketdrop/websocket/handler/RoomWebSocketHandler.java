@@ -40,6 +40,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
   @Autowired private SessionRegistry sessionRegistry;
   @Autowired private WebSocketMessagingService webSocketMessagingService;
   @Autowired private FileCleanupService fileCleanupService;
+  @Autowired(required = false) private com.princeworks.socketdrop.service.files.metadata.FileMetaDataRegistry fileMetaDataRegistry;
   @Autowired private ProgressEventService progressEventService;
   @Autowired private RoomPresenceService roomPresenceService;
 
@@ -54,11 +55,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
   public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) {
     String sessionId = session.getId();
     logger.info("WS DISCONNECTED : {}", sessionId);
-    // Capture the room before unindexing so peers get an updated roster.
-    String roomId = roomRegistry.getRoom(sessionId);
-    roomRegistry.leaveRoom(sessionId);
-    sessionRegistry.unregister(sessionId);
-    roomPresenceService.notifyPresence(roomId);
+    handleDisconnect(sessionId);
   }
 
   @Override
@@ -66,10 +63,27 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     String sessionId = session.getId();
     logger.error(
         "ERROR while connecting to : {}, error message :{}", sessionId, exception.getMessage());
+    handleDisconnect(sessionId);
+  }
+
+  private void handleDisconnect(String sessionId) {
     String roomId = roomRegistry.getRoom(sessionId);
     roomRegistry.leaveRoom(sessionId);
     sessionRegistry.unregister(sessionId);
-    roomPresenceService.notifyPresence(roomId);
+    if (roomId != null) {
+      if (!roomRegistry.roomExists(roomId)) {
+        if (fileCleanupService != null) {
+          try {
+            int cleaned = fileCleanupService.cleanupRoom(roomId);
+            logger.info("Room {} became empty after disconnect; auto-cleaned {} file(s)", roomId, cleaned);
+          } catch (Exception e) {
+            logger.warn("Auto-cleanup for empty room {} failed: {}", roomId, e.getMessage());
+          }
+        }
+      } else if (roomPresenceService != null) {
+        roomPresenceService.notifyPresence(roomId);
+      }
+    }
   }
 
   @Override
@@ -150,15 +164,25 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
       sendError(session, "Could not create room, try again");
       return;
     }
-    String userId = IdGenerator.generateUsername();
 
-    sessionRegistry.register(sessionId, new UserSessionInfo(userId, displayName.trim()));
-    roomRegistry.joinRoom(sessionId, roomId);
+    try {
+      String userId = IdGenerator.generateUsername();
 
-    webSocketMessagingService.sendToSession(
-        session, new RoomCreatedResponse(roomId, userId, displayName.trim()));
-    roomPresenceService.notifyPresence(roomId);
-    logger.info("Room id created : {} successfully!", roomId);
+      sessionRegistry.register(sessionId, new UserSessionInfo(userId, displayName.trim()));
+      roomRegistry.joinRoom(sessionId, roomId);
+
+      webSocketMessagingService.sendToSession(
+          session, new RoomCreatedResponse(roomId, userId, displayName.trim()));
+      if (roomPresenceService != null) {
+        roomPresenceService.notifyPresence(roomId);
+      }
+      logger.info("Room id created : {} successfully!", roomId);
+    } catch (Exception e) {
+      logger.error("Failed to finish room creation for {}: {}", roomId, e.getMessage());
+      roomRegistry.evictRoom(roomId);
+      sessionRegistry.unregisterUser(sessionId);
+      sendError(session, "Internal error creating room");
+    }
   }
 
   private void handleJoinRoom(WebSocketSession session, JoinRoomMessage msg) {
@@ -176,11 +200,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
       return;
     }
 
-    // Short codes are case-insensitive for easy typing; legacy room_* stay exact.
-    String roomId = rawRoomId.trim();
-    if (roomId.length() <= 8 && roomId.matches("(?i)^[a-z0-9]{4,8}$")) {
-      roomId = roomId.toUpperCase();
-    }
+    String roomId = IdGenerator.normalizeRoomId(rawRoomId);
 
     if (!roomRegistry.roomExists(roomId)) {
       logger.warn("You are trying to join a room id : {} which doesn't exist", roomId);
@@ -210,9 +230,16 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     // Registering rooms & username to a particular session
     sessionRegistry.register(sessionId, userInfo);
     roomRegistry.joinRoom(sessionId, roomId);
+
+    var existingFiles = fileMetaDataRegistry != null
+        ? fileMetaDataRegistry.findByRoomId(roomId)
+        : java.util.List.<com.princeworks.socketdrop.model.file.FileMeta>of();
+
     webSocketMessagingService.sendToSession(
-        session, new RoomJoinedResponse(roomId, userInfo.getUserId(), userInfo.getDisplayName()));
-    roomPresenceService.notifyPresence(roomId);
+        session, new RoomJoinedResponse(roomId, userInfo.getUserId(), userInfo.getDisplayName(), existingFiles));
+    if (roomPresenceService != null) {
+      roomPresenceService.notifyPresence(roomId);
+    }
 
     // Logging success
     logger.info("Room id : {} joined successfully!", roomId);
@@ -226,8 +253,21 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     roomRegistry.leaveRoom(sessionId);
     sessionRegistry.unregisterUser(sessionId);
 
-    // Tell the rest of the room the roster shrank.
-    roomPresenceService.notifyPresence(roomId);
+    if (roomId != null) {
+      if (!roomRegistry.roomExists(roomId)) {
+        if (fileCleanupService != null) {
+          try {
+            int cleaned = fileCleanupService.cleanupRoom(roomId);
+            logger.info("Room {} became empty after leave; auto-cleaned {} file(s)", roomId, cleaned);
+          } catch (Exception e) {
+            logger.warn("Auto-cleanup for empty room {} failed: {}", roomId, e.getMessage());
+          }
+        }
+      } else if (roomPresenceService != null) {
+        // Tell the rest of the room the roster shrank.
+        roomPresenceService.notifyPresence(roomId);
+      }
+    }
 
     // Logging you have left room successfully
     logger.info("Session id : {} cleared successfully", sessionId);

@@ -12,7 +12,7 @@ services:
       SPRING_FILE_MAX_DOWNLOAD_SIZE: 52428800
       SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE: 50MB
 
-      SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: 50MB
+      SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: 60MB
     volumes:
       - socket_drop_storage:/app/storage
     restart: unless-stopped
