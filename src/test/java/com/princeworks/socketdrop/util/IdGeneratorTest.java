@@ -60,5 +60,7 @@ class IdGeneratorTest {
     assertEquals("ABCDEF", IdGenerator.normalizeRoomId("  abcdef  "));
     assertEquals("123456", IdGenerator.normalizeRoomId("123456"));
     assertEquals("room_legacy_12345", IdGenerator.normalizeRoomId("room_legacy_12345"));
+    assertEquals("ABCDEF", IdGenerator.normalizeRoomId("ABCDEF,ABCDEF"));
+    assertEquals("ABCDEF", IdGenerator.normalizeRoomId("abcdef, abcdef"));
   }
 }

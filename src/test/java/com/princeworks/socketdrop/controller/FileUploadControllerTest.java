@@ -133,4 +133,38 @@ class FileUploadControllerTest {
     org.mockito.Mockito.verify(progressEventService)
         .notifyUploadCompleted("room_1", "f1", "test.txt", 4L, "member_1");
   }
+
+  @Test
+  void uploadHandlesDuplicateCommaSeparatedParams() {
+    FileStorageService fileStorageService = mock(FileStorageService.class);
+    ProgressEventService progressEventService = mock(ProgressEventService.class);
+    RoomRegistry roomRegistry = mock(RoomRegistry.class);
+    com.princeworks.socketdrop.websocket.session.SessionRegistry sessionRegistry =
+        mock(com.princeworks.socketdrop.websocket.session.SessionRegistry.class);
+
+    FileUploadController controller = new FileUploadController();
+    ReflectionTestUtils.setField(controller, "fileStorageService", fileStorageService);
+    ReflectionTestUtils.setField(controller, "progressEventService", progressEventService);
+    ReflectionTestUtils.setField(controller, "roomRegistry", roomRegistry);
+    ReflectionTestUtils.setField(controller, "sessionRegistry", sessionRegistry);
+
+    when(roomRegistry.roomExists("ABCDEF")).thenReturn(true);
+    when(roomRegistry.getSessions("ABCDEF")).thenReturn(java.util.Set.of("s1"));
+    when(sessionRegistry.matchesUser("s1", "member_1")).thenReturn(true);
+
+    UploadResponse uploadResponse = new UploadResponse();
+    uploadResponse.setFileId("f1");
+    uploadResponse.setFileName("test.txt");
+    uploadResponse.setFileSize(4L);
+
+    MockMultipartFile file =
+        new MockMultipartFile("file", "test.txt", "text/plain", "data".getBytes());
+    when(fileStorageService.uploadFile(file, "ABCDEF", "member_1")).thenReturn(uploadResponse);
+
+    // Spring passes comma-joined strings if params appear in both query string and multipart body
+    ResponseEntity<UploadResponse> response =
+        controller.handleUploads(file, "ABCDEF,ABCDEF", "member_1,member_1");
+    assertEquals(200, response.getStatusCode().value());
+    verify(progressEventService).notifyUploadCompleted("ABCDEF", "f1", "test.txt", 4L, "member_1");
+  }
 }

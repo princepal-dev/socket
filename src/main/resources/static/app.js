@@ -1143,9 +1143,7 @@ function startUpload(item) {
   form.append("roomId", state.roomId);
   if (state.userId) form.append("userId", state.userId);
 
-  const query = new URLSearchParams({ roomId: state.roomId });
-  if (state.userId) query.set("userId", state.userId);
-  xhr.open("POST", `/file/uploads?${query.toString()}`, true);
+  xhr.open("POST", "/file/uploads", true);
 
   xhr.upload.onprogress = (event) => {
     if (!event.lengthComputable) return;

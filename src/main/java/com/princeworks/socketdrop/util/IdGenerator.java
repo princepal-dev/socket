@@ -37,6 +37,9 @@ public final class IdGenerator {
       return null;
     }
     String trimmed = rawRoomId.trim();
+    if (trimmed.contains(",")) {
+      trimmed = trimmed.split(",")[0].trim();
+    }
     if (trimmed.length() <= 8 && trimmed.matches("(?i)^[a-z0-9]{4,8}$")) {
       return trimmed.toUpperCase();
     }

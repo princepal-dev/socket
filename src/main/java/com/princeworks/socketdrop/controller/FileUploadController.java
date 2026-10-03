@@ -49,9 +49,13 @@ public class FileUploadController {
       throw new InvalidArgumentException("Room does not exist", "file upload");
     }
 
-    if (userId != null && !userId.trim().isEmpty() && sessionRegistry != null) {
+    String cleanUserId = (userId != null && !userId.trim().isEmpty())
+        ? (userId.contains(",") ? userId.split(",")[0].trim() : userId.trim())
+        : null;
+
+    if (cleanUserId != null && sessionRegistry != null) {
       boolean joinedRoom = roomRegistry.getSessions(roomId).stream()
-          .anyMatch(sessionId -> sessionRegistry.matchesUser(sessionId, userId));
+          .anyMatch(sessionId -> sessionRegistry.matchesUser(sessionId, cleanUserId));
       if (!joinedRoom) {
         throw new ForbiddenOperationException("Join the room before uploading files");
       }
@@ -61,13 +65,13 @@ public class FileUploadController {
     progressEventService.notifyUploadStarted(roomId, fileName, file.getSize());
 
     try {
-      UploadResponse response = userId != null
-          ? fileStorageService.uploadFile(file, roomId, userId)
+      UploadResponse response = cleanUserId != null
+          ? fileStorageService.uploadFile(file, roomId, cleanUserId)
           : fileStorageService.uploadFile(file, roomId);
       if (response != null) {
-        if (userId != null) {
+        if (cleanUserId != null) {
           progressEventService.notifyUploadCompleted(
-              roomId, response.getFileId(), response.getFileName(), response.getFileSize(), userId);
+              roomId, response.getFileId(), response.getFileName(), response.getFileSize(), cleanUserId);
         } else {
           progressEventService.notifyUploadCompleted(
               roomId, response.getFileId(), response.getFileName(), response.getFileSize());
